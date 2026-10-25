@@ -9,3 +9,10 @@ solidworks_mcp.log
 dist/
 build/
 *.egg-info/
+
+# Local environment and outputs
+.venv/
+_smoke/
+.pytest_cache/
+*.bak
+*.bak_*
