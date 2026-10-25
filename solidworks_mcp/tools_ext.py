@@ -269,6 +269,153 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
     "list_components": (
         "List components of the active assembly (name, path, config, suppressed, fixed).",
         _p(top_level_only={"type": "boolean", "default": True}), [], "list_components"),
+
+    # ------------------------------------------------------------ drawing
+    "create_drawing": (
+        "New drawing of a saved part/assembly (default: the active model). Default layout: projected "
+        "Front/Top/Right per the sheet's 1st/3rd-angle setting + isometric, auto-scaled to the sheet. "
+        "`views` gives independent named views instead. Optional model dimensions and save path.",
+        _p(model_path={"type": "string"}, views={"type": "array", "items": {"type": "string", "enum": VIEW_ENUM}},
+           scale={"type": "string", "default": "auto", "description": "'auto' or e.g. '1:2', '2:1'"},
+           template={"type": "string", "description": ".drwdot path (default: SolidWorks default template)"},
+           include_iso={"type": "boolean", "default": True},
+           model_dimensions={"type": "boolean", "default": False},
+           save_path={"type": "string", "description": "Save as .slddrw"}),
+        [], "create_drawing"),
+    "list_drawing_views": (
+        "List sheets and views of the active drawing: name, model, scale, outline and center in sheet mm. "
+        "Use the outline to place section/detail views.", {}, [], "list_drawing_views"),
+    "add_drawing_view": (
+        "Add a named model view (front/top/.../isometric) at sheet position x, y (mm).",
+        _p(view={"type": "string", "enum": VIEW_ENUM}, x={"type": "number"}, y={"type": "number"},
+           model_path={"type": "string"}, scale={"type": "string"}),
+        ["view", "x", "y"], "add_drawing_view"),
+    "add_section_view": (
+        "Full section through a view: cutting line vertical/horizontal at `position` (0..1 across the view). "
+        "Placed beside/below the parent unless x, y (sheet mm) are given.",
+        _p(parent_view={"type": "string"}, direction={"type": "string", "enum": ["vertical", "horizontal"]},
+           position={"type": "number", "default": 0.5}, x={"type": "number"}, y={"type": "number"},
+           label={"type": "string", "default": "A"}, flip={"type": "boolean", "default": False}),
+        ["parent_view"], "add_section_view"),
+    "add_detail_view": (
+        "Detail view: circle centred at sheet point `center` [x, y] mm inside the parent view, radius mm.",
+        _p(parent_view={"type": "string"}, center={"type": "array", "items": {"type": "number"}},
+           radius={"type": "number"}, scale={"type": "string", "default": "2:1"},
+           x={"type": "number"}, y={"type": "number"}, label={"type": "string", "default": "B"}),
+        ["parent_view", "center", "radius"], "add_detail_view"),
+    "insert_model_annotations": (
+        "Import model items into the drawing (all views or listed views). Default: dimensions marked "
+        "for drawing + hole callouts.",
+        _p(types={"type": "array", "items": {"type": "string", "enum": [
+               "dimensions_marked", "dimensions_all", "hole_callouts", "cosmetic_threads", "datums", "gtols",
+               "notes", "surface_finish", "axes", "center_of_mass", "hole_wizard_locations",
+               "hole_wizard_profiles"]}},
+           views={"type": "array", "items": {"type": "string"}}),
+        [], "insert_model_annotations"),
+    "insert_bom": (
+        "Insert a BOM table for a view's model at a sheet corner. Template auto-found if omitted.",
+        _p(view={"type": "string"}, bom_type={"type": "string", "enum": ["parts_only", "top_level", "indented"],
+                                              "default": "parts_only"},
+           template={"type": "string", "description": ".sldbomtbt path"},
+           anchor={"type": "string", "enum": ["top_left", "top_right", "bottom_left", "bottom_right"],
+                   "default": "top_right"},
+           configuration={"type": "string", "default": ""}),
+        [], "insert_bom"),
+    "auto_balloon": (
+        "Auto-balloon components in views (all views if none given); needs a BOM for item numbers.",
+        _p(views={"type": "array", "items": {"type": "string"}},
+           layout={"type": "string", "enum": ["square", "circle", "top", "bottom", "right", "left"],
+                   "default": "square"},
+           style={"type": "string", "enum": ["circular", "triangle", "hexagon", "box", "diamond",
+                                             "split_circle"], "default": "circular"}),
+        [], "auto_balloon"),
+
+    # ------------------------------------------------------------ loft / sweep
+    "loft": (
+        "Loft (boss or cut) through >= 2 closed profile sketches in order, optional guide curves. "
+        "Sketch profiles on offset planes first (create_ref_plane, then create_sketch(plane=<name>)).",
+        _p(profiles=STR_LIST, guides={"type": "array", "items": {}},
+           cut={"type": "boolean", "default": False}, closed={"type": "boolean", "default": False},
+           start_tangency={"type": "string", "enum": ["none", "normal", "direction", "all_faces"], "default": "none"},
+           end_tangency={"type": "string", "enum": ["none", "normal", "direction", "all_faces"], "default": "none"},
+           thin_thickness={"type": "number"}, merge={"type": "boolean", "default": True}, unit=UNIT),
+        ["profiles"], "loft"),
+    "sweep": (
+        "Sweep (boss or cut) a profile sketch — or a circle of circular_diameter — along a path "
+        "(sketch name or {\"edge_index\": n}). Optional guides and twist (degrees).",
+        _p(path={"description": "Path sketch name or reference object"},
+           profile={"type": "string"}, circular_diameter={"type": "number"},
+           guides={"type": "array", "items": {}}, cut={"type": "boolean", "default": False},
+           twist_angle={"type": "number", "default": 0},
+           keep_normal_constant={"type": "boolean", "default": False},
+           thin_thickness={"type": "number"}, merge={"type": "boolean", "default": True}, unit=UNIT),
+        ["path"], "sweep"),
+
+    # ------------------------------------------------------------ batch / import
+    "batch_export": (
+        "Export every .sldprt/.sldasm (optionally .slddrw) in a folder to STEP/STL/3MF/IGES/Parasolid/PDF/"
+        "DXF/eDrawings. Mirrors folder structure under output_dir (default <folder>/export).",
+        _p(folder={"type": "string"}, formats={"type": "array", "items": {"type": "string", "enum": [
+               "step", "stp", "iges", "parasolid", "x_b", "stl", "3mf", "acis", "pdf", "dxf", "dwg",
+               "edrawings", "png", "jpg"]}},
+           recursive={"type": "boolean", "default": False}, output_dir={"type": "string"},
+           file_types={"type": "array", "items": {"type": "string", "enum": ["sldprt", "sldasm", "slddrw"]}},
+           overwrite={"type": "boolean", "default": False}, max_files={"type": "integer", "default": 100}),
+        ["folder"], "batch_export"),
+    "import_file": (
+        "Open a STEP/IGES/Parasolid/STL/3MF or Inventor/CATIA/NX/Creo file (import or 3D Interconnect), "
+        "optionally save as .sldprt/.sldasm. Reports bodies/components.",
+        _p(filepath={"type": "string"}, save_as={"type": "string"}), ["filepath"], "import_file"),
+    "activate_document": (
+        "Bring an open document to the front by its title.",
+        _p(name={"type": "string"}), ["name"], "activate_document"),
+
+    # ------------------------------------------------------------ edit
+    "get_feature_info": (
+        "Feature type and editable parameters (extrude depth/end condition, revolve angle, fillet radius, "
+        "chamfer, shell/rib thickness, pattern counts/spacing, hole size).",
+        _p(name={"type": "string"}, unit=UNIT), ["name"], "get_feature_info"),
+    "edit_feature": (
+        "Edit an existing feature's definition and rebuild. params by kind — extrude: depth, depth2, "
+        "end_condition(2) [blind, through_all, through_all_both, mid_plane, up_to_next, through_next], "
+        "reverse, draft_angle; revolve: angle, angle2; fillet: radius; chamfer: distance, angle; "
+        "shell/rib: thickness; linear_pattern: count1, spacing1, reverse1, count2, spacing2, reverse2; "
+        "circular_pattern: count, angle, equal_spacing, reverse. Angles in degrees.",
+        _p(name={"type": "string"}, params={"type": "object"}, unit=UNIT), ["name", "params"], "edit_feature"),
+
+    # ------------------------------------------------------------ rib / draft / hole
+    "rib": (
+        "Rib from the last sketch (open contour touching the walls).",
+        _p(thickness={"type": "number"}, two_sided={"type": "boolean", "default": True},
+           flip_material={"type": "boolean", "default": False},
+           reverse_thickness={"type": "boolean", "default": False},
+           draft_angle={"type": "number", "default": 0}, draft_outward={"type": "boolean", "default": False},
+           normal_to_sketch={"type": "boolean", "default": False}, unit=UNIT),
+        ["thickness"], "rib"),
+    "draft": (
+        "Neutral-plane draft (degrees) on faces chosen by index or filter, e.g. outer side faces "
+        "face_type='plane' + face_normal='x' + min_area=100. Retries with tangent propagation and flip.",
+        _p(angle={"type": "number"},
+           neutral={"type": "object", "description": "Neutral plane: {\"face_normal\": \"-y\"} = largest planar "
+                    "model face with that normal (most reliable), or a reference spec ({\"plane\": \"Top\"}, "
+                    "{\"face_index\": n})"},
+           face_indices=INT_LIST,
+           face_normal={"type": "string", "enum": SIGNED_AXIS_ENUM},
+           face_type={"type": "string", "enum": ["plane", "cylinder", "cone", "other"]},
+           min_area={"type": "number", "description": "Skip faces smaller than this (unit^2), e.g. hole walls"},
+           flip={"type": "boolean", "default": False},
+           propagation={"type": "string", "enum": ["none", "tangent"], "default": "none"}, unit=UNIT),
+        ["angle", "neutral"], "draft"),
+    "hole_wizard": (
+        "ISO Hole Wizard holes at model points [[x,y,z],...] on one planar face. kind: tapped "
+        "(size 'M3x0.5'), tapped_bottoming, clearance/counterbore/countersink/countersink_socket "
+        "(size 'M3'), drill. Give depth (+ thread_depth for tapped) or through_all.",
+        _p(size={"type": "string"}, points={"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+           kind={"type": "string", "enum": ["tapped", "tapped_bottoming", "clearance", "drill", "counterbore",
+                                            "countersink", "countersink_socket"], "default": "tapped"},
+           depth={"type": "number"}, through_all={"type": "boolean", "default": False},
+           thread_depth={"type": "number"}, standard={"type": "string", "default": "ISO"}, unit=UNIT),
+        ["size", "points"], "hole_wizard"),
 }
 
 

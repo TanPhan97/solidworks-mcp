@@ -116,17 +116,16 @@ class FeatureOperations:
             Tuple of (success: bool, sketch_name: str, error_msg: str)
         """
         try:
-            # Step 1: Close active sketch if one is open
+            # Step 1: Close active sketch if one is open (merging coincident
+            # endpoints first so multi-segment profiles are connected)
+            from .com_utils import close_active_sketch
             try:
-                active_sketch = doc.SketchManager.ActiveSketch
-                if active_sketch is not None:
-                    doc.SketchManager.InsertSketch(True)
+                if close_active_sketch(doc):
                     logger.debug("Closed active sketch")
-            except:
-                # Try closing anyway
+            except Exception:
                 try:
                     doc.InsertSketch2(True)
-                except:
+                except Exception:
                     pass
             
             # Step 2: Clear selection
@@ -333,7 +332,7 @@ class FeatureOperations:
             # Determine end condition
             if through_all:
                 if both_directions:
-                    end_cond = 2  # swEndCondThroughAllBoth
+                    end_cond = 9  # swEndCondThroughAllBoth (was 2 = ThroughNext, wrong)
                 else:
                     end_cond = 1  # swEndCondThroughAll
                 cut_depth = 0

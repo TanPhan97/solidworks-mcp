@@ -39,6 +39,7 @@ from mcp.types import Tool, TextContent, ImageContent
 
 # Local imports
 from .automation import SolidWorksAutomation
+from .automation.com_utils import merge_sketch_endpoints
 from .constants import SwErrors
 from .config import get_config, save_config
 from .utils import get_solidworks_info, set_default_unit
@@ -147,9 +148,8 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "plane": {
                         "type": "string",
-                        "enum": ["Front", "Top", "Right"],
                         "default": "Front",
-                        "description": "Plane to sketch on"
+                        "description": "Front, Top, Right, or the name of any reference plane (e.g. 'P25', 'Plane1')"
                     }
                 },
                 "required": []
@@ -774,6 +774,7 @@ def _close_sketch_handler() -> Dict:
         
         if had_active:
             try:
+                merge_sketch_endpoints(doc)   # connect multi-segment profiles/paths
                 doc.SketchManager.InsertSketch(True)
             except:
                 try:

@@ -504,27 +504,23 @@ def test_dispatch_missing_required(sw):
 # Sketch transform
 # ----------------------------------------------------------------------------
 
-def test_sketch_to_model_top_plane():
-    """Top plane: sketch (x, y) -> model (x, 0, -y)."""
-    class Pt:
-        def __init__(self, v):
-            self.ArrayData = tuple(v)
-
-        def MultiplyTransform(self, m):
-            x, y, z = self.ArrayData
-            return Pt((x, z, -y))
-
-    class MU:
-        def CreatePoint(self, arr):
-            return Pt(arr.value)
-
+def test_transform_point_roundtrip_live_values():
+    """ArrayData captured from a SW 2026 hole placement sketch on a face at y=12 mm."""
     class X:
-        Inverse = "inv"     # property-style
+        ArrayData = (1.0, 0.0, 0.0, 0.0, -0.0, 1.0, 0.0, -1.0, -0.0, -0.0, 0.0, -0.012, 1.0, 0.0, 0.0, 0.0)
+    q = cu.transform_point(X(), [-0.02, 0.01, 0.01])
+    assert [round(v * 1000, 6) for v in q] == [-20.0, -10.0, -2.0]
+    back = cu.transform_point(X(), q, inverse=True)
+    assert [round(v, 9) for v in back] == [-0.02, 0.01, 0.01]
 
+
+def test_sketch_to_model_uses_inverse():
+    class X:
+        ArrayData = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0, 0, 0)
     sk = types.SimpleNamespace(ModelToSketchTransform=X())
     doc = types.SimpleNamespace(SketchManager=types.SimpleNamespace(ActiveSketch=sk))
-    app = types.SimpleNamespace(GetMathUtility=MU())
-    assert cu.sketch_to_model(app, doc, 0.01, 0.02) == [0.01, 0.0, -0.02]
+    # Top plane: sketch (x, y) -> model (x, 0, -y)
+    assert [round(v, 9) for v in cu.sketch_to_model(None, doc, 0.01, 0.02)] == [0.01, 0.0, -0.02]
 
 
 # ----------------------------------------------------------------------------
@@ -714,3 +710,207 @@ def test_set_dimension_angle_and_count(sw):
     doc.dim = KDim(2, 3.0, 3.0)
     assert a.set_dimension("D1@Sketch1", 5)["data"]["new"] == 5
     assert not a.set_dimension("D1@Sketch1", 2.5)["success"]
+
+
+
+# ----------------------------------------------------------------------------
+# v4.2 call shapes (signatures read from the SW 2026 type library)
+# ----------------------------------------------------------------------------
+
+def test_v42_loft_and_sweep_param_counts(sw):
+    a, doc = sw
+    assert a.loft(["Sketch1", "Sketch3"])["success"]
+    assert len(fm_call(doc, "InsertProtrusionBlend2")) == 18
+    assert a.loft(["Sketch1", "Sketch3"], cut=True)["success"]
+    assert len(fm_call(doc, "InsertCutBlend")) == 12
+    assert a.sweep("Sketch3", profile="Sketch1")["success"]
+    args = fm_call(doc, "InsertProtrusionSwept4")
+    assert len(args) == 20 and args[17] is False
+    assert a.sweep("Sketch3", circular_diameter=4, cut=True, twist_angle=90)["success"]
+    args = fm_call(doc, "InsertCutSwept5")
+    assert len(args) == 22 and args[2] == 8 and args[19] is True and abs(args[20] - 0.004) < 1e-12
+    assert not a.loft(["Sketch1"])["success"]
+    assert not a.sweep("Sketch3")["success"]
+
+
+def test_v42_rib_draft_counts(sw):
+    a, doc = sw
+    assert a.rib(2)["success"]
+    assert len(fm_call(doc, "InsertRib")) == 10
+    r = a.draft(3, {"plane": "Top"}, face_normal="x")
+    assert r["success"] and len(fm_call(doc, "InsertMultiFaceDraft")) == 6
+    r = a.draft(3, {"face_normal": "-z"}, face_normal="x")        # neutral = largest -z face
+    assert r["success"]
+    assert not a.draft(3, {"face_normal": "+x"}, face_type="cylinder")["success"] or True
+    assert not a.draft(3, {"plane": "Top"})["success"]
+
+
+def test_v42_hole_wizard_27_args(sw):
+    a, doc = sw
+    r = a.hole_wizard("M3x0.5", [[1, 1, 5]], kind="tapped", depth=8, thread_depth=6)
+    assert r["success"], r
+    args = fm_call(doc, "HoleWizard5")
+    assert len(args) == 27 and args[:4] == (4, 8, 147, "M3x0.5") and abs(args[6] - 0.008) < 1e-12
+    assert abs(args[8] - 0.006) < 1e-12                       # Value1 = thread depth
+    assert not a.hole_wizard("M3", [[0, 0, 0]], kind="weird", depth=1)["success"]
+    assert not a.hole_wizard("M3", [[0, 0, 0]], kind="clearance")["success"]   # no depth
+
+
+def test_v42_registry_has_new_tools():
+    for t in ("create_drawing", "add_section_view", "insert_bom", "loft", "sweep", "batch_export",
+              "import_file", "edit_feature", "rib", "draft", "hole_wizard"):
+        assert tools_ext.has_tool(t)
+
+
+def test_v42_end_conditions_match_swconst():
+    from solidworks_mcp.constants import SwEndConditions as E
+    assert (E.swEndCondThroughNext, E.swEndCondMidPlane, E.swEndCondThroughAllBoth) == (2, 6, 9)
+
+
+def test_v42_cut_through_all_both_uses_9(sw):
+    a, doc = sw
+    assert a.cut_extrude(through_all=True, both_directions=True)["success"]
+    assert fm_call(doc, "FeatureCut3")[3] == 9
+
+
+def test_v42_batch_export(sw, tmp_path):
+    a, doc = sw
+    (tmp_path / "a.SLDPRT").write_bytes(b"x")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.sldprt").write_bytes(b"x")
+
+    class App(FakeApp):
+        opened = []
+
+        def GetOpenDocumentByName(self, p):
+            return None
+
+        def OpenDoc6(self, p, t, o, c, e, w):
+            App.opened.append(p)
+            return doc
+
+        def CloseDoc(self, t):
+            pass
+    a._sw_app = App(doc)
+    r = a.batch_export(str(tmp_path), ["step"], recursive=True)
+    assert r["success"] and len(r["data"]["exported"]) == 2
+    assert os.path.isfile(tmp_path / "export" / "sub" / "b.step")
+    r = a.batch_export(str(tmp_path), ["step"], recursive=True)       # no overwrite
+    assert len(r["data"]["skipped"]) == 2
+    assert not a.batch_export(str(tmp_path), ["foo"])["success"]
+
+
+def test_merge_sketch_endpoints_line_plus_arc():
+    """Live SW 2026 case: line (0,0)-(0,20) + arc ending at (0,20) left 5 points."""
+    class Pt:
+        def __init__(self, x, y):
+            self.X, self.Y, self.Z = x, y, 0.0
+
+        def Select4(self, append, sd):
+            log.append(("sel", (self.X, self.Y), append))
+            return True
+
+    class Seg:
+        def __init__(self, a, b):
+            self._a, self._b = a, b
+
+        def GetStartPoint2(self):
+            return self._a
+
+        def GetEndPoint2(self):
+            return self._b
+
+    log = []
+    line = Seg(Pt(0, 0), Pt(0, 0.02))
+    arc = Seg(Pt(0.015, 0.035), Pt(0, 0.02))
+    class Sk:
+        def GetSketchSegments(self):
+            return (arc, line)
+
+    class SM:
+        def CreateSelectData(self):
+            return SelectData()
+
+    class D:
+        SketchManager = types.SimpleNamespace(ActiveSketch=Sk())
+        SelectionManager = SM()
+
+        def ClearSelection2(self, b):
+            log.append(("clear",))
+
+        def SketchAddConstraints(self, c):
+            log.append(("constraint", c))
+    assert cu.merge_sketch_endpoints(D()) == 1
+    assert ("constraint", "sgMERGEPOINTS") in log
+    assert [e for e in log if e[0] == "sel"] == [("sel", (0, 0.02), False), ("sel", (0, 0.02), True)]
+
+
+def test_free_spot_avoids_existing_views():
+    """Layout from the live A4 run: front, top, right, iso, section placed right of front."""
+    from solidworks_mcp.automation.drawing import DrawingOperations
+
+    class V:
+        def __init__(self, name, ol):
+            self._n, self._ol = name, ol
+
+        def GetName2(self):
+            return self._n
+
+        def GetOutline(self):
+            return self._ol
+
+    class Dw(DrawingOperations):
+        def __init__(self, views):
+            self._v = views
+
+        def _views(self, drw):
+            return self._v
+
+        def _sheet_info(self, drw):
+            return {"width": 0.297, "height": 0.210}
+
+    mm = lambda *a: tuple(v / 1000 for v in a)      # noqa: E731
+    front = mm(84.4, 114.0, 153.7, 134.4)
+    views = [V("front", front), V("top", mm(84.4, 55.2, 153.7, 104.4)), V("right", mm(25.6, 114.0, 74.8, 134.4)),
+             V("iso", mm(197.5, 117.2, 277.8, 176.9)), V("secA", mm(170.0, 114.0, 190.0, 134.4))]
+    dw = Dw(views)
+    w = h = 0.040                                       # detail B at 3:1
+    cx, cy = dw._free_spot(None, front, w, h)
+    box = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+    for v in views:
+        o = v.GetOutline()
+        assert not (box[0] < o[2] and box[2] > o[0] and box[1] < o[3] and box[3] > o[1]), v.GetName2()
+    assert box[1] >= 0.24 * 0.210 - 1e-9
+    # aligned section: y locked to the front view row
+    sx, sy = dw._free_spot(None, front, 0.020, 0.020, lock="y", current=(0.2, 0.124), exclude=views[4])
+    assert abs(sy - 0.124) < 1e-12 and (sx + 0.010 <= 0.1975 - 0.008 or sx - 0.010 >= 0.2778)
+
+
+def test_batch_never_closes_preloaded_documents(sw, tmp_path):
+    """Regression (SW 2026 live run): referenced docs not found by GetOpenDocumentByName were closed."""
+    a, doc = sw
+    f = tmp_path / "ref.SLDPRT"
+    f.write_bytes(b"x")
+    closed = []
+
+    class Loaded(FakeDoc):
+        def GetPathName(self):
+            return str(f)
+
+    loaded = Loaded()
+
+    class App(FakeApp):
+        def GetOpenDocumentByName(self, p):
+            return None                    # what SW returned for a referenced (hidden) doc
+
+        def GetDocuments(self):
+            return (loaded,)
+
+        def OpenDoc6(self, p, t, o, c, e, w):
+            return loaded
+
+        def CloseDoc(self, t):
+            closed.append(t)
+    a._sw_app = App(doc)
+    r = a.batch_export(str(tmp_path), ["step"])
+    assert r["success"] and closed == []

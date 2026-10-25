@@ -375,29 +375,15 @@ class ModelOperations:
             if ext not in _EXPORT_EXTS:
                 return self._result(False, f"Unsupported extension {ext}. Use one of {sorted(_EXPORT_EXTS)}",
                                     SwErrors.swInvalidFileType)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            errs, warns = cu.byref_int(0), cu.byref_int(0)
-            options = 1 | 2   # Silent | Copy
-            ok = False
-            try:
-                r = doc.Extension.SaveAs(path, 0, options, cu.nothing(), errs, warns)
-                ok = bool(r[0] if isinstance(r, tuple) else r)
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"Extension.SaveAs failed: {e}")
+            ok, errs, warns = cu.save_copy(self.app, doc, path)
             if not ok:
-                try:
-                    ok = doc.SaveAs3(path, 0, options) == 0
-                except Exception as e:  # noqa: BLE001
-                    logger.debug(f"SaveAs3 failed: {e}")
-            if not ok or not os.path.exists(path):
-                return self._result(False, f"Export failed (errors={getattr(errs, 'value', '?')})",
+                return self._result(False, f"Export failed (swFileSaveError {errs})",
                                     SwErrors.swExportError, {"path": path})
             size_kb = round(os.path.getsize(path) / 1024, 1)
             return self._result(True, f"Exported {ext[1:].upper()} → {path} ({size_kb} KB)",
                                 SwErrors.swSuccess,
                                 {"path": path, "format": ext[1:], "size_kb": size_kb,
-                                 "warnings": getattr(warns, "value", 0)})
+                                 "warnings": warns})
         except Exception as e:
             logger.error(f"export error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swExportError)
