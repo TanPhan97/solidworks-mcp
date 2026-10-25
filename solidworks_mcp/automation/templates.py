@@ -29,6 +29,7 @@ _PREF_DEFAULT_TEMPLATE = {"part": 8, "assembly": 9, "drawing": 10}
 _PREF_TEMPLATE_FOLDERS = 0            # swFileLocationsDocumentTemplates
 _DOC_TYPE = {"part": 1, "assembly": 2, "drawing": 3}
 _EXT = {"part": ".prtdot", "assembly": ".asmdot", "drawing": ".drwdot"}
+PROGRAMDATA_ROOTS = (r"C:\ProgramData\SOLIDWORKS", r"C:\ProgramData\SolidWorks")
 _PREFERRED_NAMES = {"part": ("part",), "assembly": ("assembly", "assem", "asm"),
                     "drawing": ("drawing", "drw")}
 
@@ -94,7 +95,7 @@ def resolve_template(sw_app, kind: str, configured: str = "auto",
             return p, f"template folder {folder}", tried
 
     # 5. ProgramData, any version, newest first
-    for root in (r"C:\ProgramData\SOLIDWORKS", r"C:\ProgramData\SolidWorks"):
+    for root in PROGRAMDATA_ROOTS:
         for folder in sorted(glob.glob(os.path.join(root, "SOLIDWORKS *", "templates")), reverse=True):
             tried.append(f"ProgramData: {folder}")
             p = _scan_folder(folder, kind)

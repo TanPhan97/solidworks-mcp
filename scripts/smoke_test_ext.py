@@ -78,6 +78,13 @@ step("ref plane offset 25 from Top", sw.create_ref_plane({"plane": "Top"}, dista
 # Parametric edit
 dims = step("list_dimensions", sw.list_dimensions()).get("data", {}).get("dimensions", [])
 print("  dims:", json.dumps(dims[:6]))
+by_name = {d["name"]: d for d in dims}
+cham_ang = by_name.get("D2@Chamfer1", {})
+lp_cnt = next((d for n, d in by_name.items() if n.startswith("D1@LPattern")), {})
+step("dim kinds", {"success": cham_ang.get("unit") == "deg" and abs(cham_ang.get("value", 0) - 45) < 1e-6
+                   and lp_cnt.get("kind") == "count" and lp_cnt.get("value") == 3,
+                   "message": f"chamfer angle={cham_ang.get('value')} {cham_ang.get('unit')}, "
+                              f"pattern count={lp_cnt.get('value')} ({lp_cnt.get('kind')})"})
 d_ext = next((d["name"] for d in dims if "Boss-Extrude1" in d["full_name"]), None)
 if d_ext:
     step(f"set {d_ext}=12", sw.set_dimension(d_ext, 12))

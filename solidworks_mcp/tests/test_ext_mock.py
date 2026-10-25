@@ -653,11 +653,21 @@ def test_template_config_override_and_missing(tmp_path):
     t = tmp_path / "x.prtdot"
     t.write_bytes(b"x")
     assert resolve_template(TplApp(), "part", str(t))[1] == "config.json"
-    path, _, tried = resolve_template(TplApp(), "drawing", "auto", lambda k: None)
+    import solidworks_mcp.automation.templates as tpl
+    saved, tpl.PROGRAMDATA_ROOTS = tpl.PROGRAMDATA_ROOTS, ()
+    try:
+        path, _, tried = resolve_template(TplApp(), "drawing", "auto", lambda k: None)
+    finally:
+        tpl.PROGRAMDATA_ROOTS = saved
     assert path is None and len(tried) >= 2
 
 
-def test_create_new_part_uses_resolver(tmp_path):
+def test_create_new_part_uses_resolver(tmp_path, monkeypatch):
+    # Isolate from real templates on a Windows machine with SolidWorks installed
+    import solidworks_mcp.automation.templates as tpl
+    import solidworks_mcp.automation.documents as docs
+    monkeypatch.setattr(tpl, "PROGRAMDATA_ROOTS", ())
+    monkeypatch.setattr(docs, "find_template", lambda kind: None)
     t = tmp_path / "p.prtdot"
     t.write_bytes(b"x")
     a = SolidWorksAutomation()
@@ -669,3 +679,38 @@ def test_create_new_part_uses_resolver(tmp_path):
     app.prefs = {}
     r = a.create_new_part()
     assert not r["success"] and "tried" in r["data"] and app.new_docs == [str(t)]
+
+
+# ----------------------------------------------------------------------------
+# Dimension kind detection (values observed on SW 2026 / 34.3.2)
+# ----------------------------------------------------------------------------
+
+class KDim:
+    def __init__(self, t, sysv, docv):
+        self._t, self.SystemValue, self.Value = t, sysv, docv
+        self.FullName = "D1@X@Part2.Part"
+
+    def GetType(self):
+        return self._t
+
+    def SetSystemValue3(self, v, opt, cfg):
+        self.SystemValue = v
+        return 0
+
+
+def test_dim_kind_from_live_values():
+    from solidworks_mcp.automation.model_ops import ModelOperations as M
+    assert M._dim_kind(KDim(1, 0.010, 10.0)) == "length"                         # Boss-Extrude depth
+    assert M._dim_kind(KDim(3, math.radians(45), 45.0)) == "angle"              # Chamfer angle
+    assert M._dim_kind(KDim(1, math.radians(45), 45.0)) == "angle"              # ratio wins
+    assert M._dim_kind(KDim(2, 3.0, 3.0)) == "count"                            # LPattern instances
+
+
+def test_set_dimension_angle_and_count(sw):
+    a, doc = sw
+    doc.dim = KDim(3, math.radians(45), 45.0)
+    r = a.set_dimension("D1@Sketch1", 30)
+    assert r["success"] and r["data"]["kind"] == "angle" and r["data"]["new"] == 30.0
+    doc.dim = KDim(2, 3.0, 3.0)
+    assert a.set_dimension("D1@Sketch1", 5)["data"]["new"] == 5
+    assert not a.set_dimension("D1@Sketch1", 2.5)["success"]

@@ -32,6 +32,42 @@ class ModelOperations:
     # Dimensions
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _dim_kind(dim) -> str:
+        """
+        'length' | 'angle' | 'count'.
+        Verified on SW 2026: IDimension.GetType returns 2 for integer dims
+        (pattern instance counts). Linear vs angular is decided from the ratio
+        Value (document units) / SystemValue (m or rad): ~57.2958 => degrees.
+        """
+        t = int(cu.try_call(dim, "GetType", default=0) or 0)
+        if t == 2:
+            return "count"
+        sysv = cu.try_call(dim, "SystemValue")
+        docv = cu.try_call(dim, "Value")
+        try:
+            sysv, docv = float(sysv), float(docv)
+            if abs(sysv) > 1e-12:
+                ratio = docv / sysv
+                if abs(ratio - 180.0 / math.pi) < 1e-3:
+                    return "angle"
+                return "length"
+        except (TypeError, ValueError):
+            pass
+        return "angle" if t == 3 else "length"
+
+    def _dim_show(self, kind: str, v_si, unit: str = None):
+        if v_si is None:
+            return None
+        if kind == "count":
+            return int(round(v_si))
+        if kind == "angle":
+            return round(math.degrees(v_si), 6)
+        return round(self._units.from_meters(v_si, unit), 6)
+
+    def _dim_unit(self, kind: str, unit: str = None) -> str:
+        return {"count": "", "angle": "deg"}.get(kind, unit or self._units.default_unit.value)
+
     def list_dimensions(self, feature: str = None, unit: str = None) -> Dict:
         """All driving dimensions (FullName = 'D1@Sketch1@Part1.SLDPRT'). Angles reported in degrees."""
         try:
@@ -49,15 +85,14 @@ class ModelOperations:
                             dim = cu.call(dd, "GetDimension2", 0)
                             v = float(cu.call(dim, "SystemValue"))
                             name = str(cu.call(dim, "FullName"))
-                            # swDimensionParamType_e: 2 = DoubleAngular
-                            is_ang = int(cu.try_call(dim, "GetType", default=0) or 0) == 2
+                            kind = self._dim_kind(dim)
                             dims.append({
                                 "name": "@".join(name.split("@")[:2]),   # usable with set_dimension
                                 "full_name": name,
                                 "feature": fname,
-                                "value": round(math.degrees(v), 6) if is_ang
-                                         else round(self._units.from_meters(v, unit), 6),
-                                "unit": "deg" if is_ang else (unit or self._units.default_unit.value),
+                                "kind": kind,
+                                "value": self._dim_show(kind, v, unit),
+                                "unit": self._dim_unit(kind, unit),
                             })
                         except Exception as e:  # noqa: BLE001
                             logger.debug(f"dimension read failed: {e}")
@@ -71,7 +106,8 @@ class ModelOperations:
     def set_dimension(self, name: str, value: float, unit: str = None) -> Dict:
         """
         Change a dimension by name ('D1@Sketch1' or 'D1@Boss-Extrude1') and rebuild.
-        unit='deg' for angular dimensions.
+        The dimension kind is detected: angles take degrees (unit='rad' for
+        radians), counts take an integer, lengths use `unit`.
         """
         try:
             doc, err = self.get_active_doc()
@@ -81,11 +117,17 @@ class ModelOperations:
             if dim is None:
                 return self._result(False, f"Dimension '{name}' not found. Use list_dimensions.",
                                     SwErrors.swInvalidInput)
-            is_ang = (unit or "").lower() in ("deg", "rad")
-            if is_ang:
-                v = math.radians(value) if unit.lower() == "deg" else float(value)
+            kind = self._dim_kind(dim)
+            len_unit = None if (unit or "").lower() in ("deg", "rad") else unit
+            if kind == "angle":
+                v = float(value) if (unit or "").lower() == "rad" else math.radians(value)
+            elif kind == "count":
+                if float(value) != int(value) or int(value) < 1:
+                    return self._result(False, f"{name} is a count; give a positive integer",
+                                        SwErrors.swInvalidInput)
+                v = float(int(value))
             else:
-                v = self._units.to_meters(value, unit)
+                v = self._units.to_meters(value, len_unit)
             old = cu.try_call(dim, "SystemValue")
             if not set_dimension_value(dim, v):
                 return self._result(False, f"Could not set {name}", SwErrors.swFeatureError)
@@ -93,17 +135,14 @@ class ModelOperations:
             new = cu.try_call(dim, "SystemValue")
 
             def show(x):
-                if x is None:
-                    return None
-                if is_ang:
-                    return round(math.degrees(x), 6) if unit.lower() == "deg" else x
-                return round(self._units.from_meters(x, unit), 6)
+                return self._dim_show(kind, x, len_unit)
 
             errors = self._rebuild_errors(doc)
             return self._result(not errors, f"{name}: {show(old)} → {show(new)}"
                                 + (f" | rebuild errors: {errors}" if errors else ""),
                                 SwErrors.swSuccess if not errors else SwErrors.swFeatureError,
-                                {"name": name, "old": show(old), "new": show(new),
+                                {"name": name, "kind": kind, "unit": self._dim_unit(kind, len_unit),
+                                 "old": show(old), "new": show(new),
                                  "rebuild_ok": rebuilt, "errors": errors})
         except Exception as e:
             logger.error(f"set_dimension error: {e}\n{traceback.format_exc()}")

@@ -206,7 +206,8 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
         _p(feature={"type": "string"}, unit=UNIT), [], "list_dimensions"),
     "set_dimension": (
         "Change a dimension by name (e.g. 'D1@Sketch1', 'D1@Boss-Extrude1') and rebuild. "
-        "Reports rebuild errors. unit='deg' for angles.",
+        "Reports rebuild errors. Kind is auto-detected: angles in degrees (unit='rad' for radians), "
+        "pattern counts as integers, lengths in `unit`.",
         _p(name={"type": "string"}, value={"type": "number"},
            unit={"type": "string", "enum": ["mm", "cm", "m", "inch", "ft", "deg", "rad"]}),
         ["name", "value"], "set_dimension"),
