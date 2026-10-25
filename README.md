@@ -143,6 +143,15 @@ pip install -r requirements.txt
 
 ### 3. Configure Claude Desktop
 
+**Automatic (recommended, Windows):** merges into the existing config, keeps other servers, writes a backup:
+
+```
+.venv\Scripts\python.exe scripts\register_claude_desktop.py
+```
+Use `--dry-run` to preview, `--remove` to unregister.
+
+**Manual:**
+
 Add the following to your `claude_desktop_config.json`:
 
 **Location:** `C:\Users\YOUR_NAME\AppData\Roaming\Claude\claude_desktop_config.json`
