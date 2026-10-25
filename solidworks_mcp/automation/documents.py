@@ -14,6 +14,7 @@ import pythoncom
 
 from ..constants import SwErrors, SwDocumentTypes, SwFileTypes
 from ..utils import find_template
+from .templates import resolve_template
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,27 @@ class DocumentOperations:
     - self._units: UnitConverter instance
     """
     
+    def _new_document(self, kind: str):
+        """
+        Resolve the template for `kind` and call NewDocument.
+        Returns (doc, template_path, error_result).
+        """
+        configured = getattr(self._config, f"{kind}_template", "auto")
+        template, source, tried = resolve_template(self._sw_app, kind, configured, find_template)
+        if not template:
+            return None, None, self._result(False,
+                f"No {kind} template found. Set \"{kind}_template\" in solidworks_mcp/config.json "
+                f"to a .{'prtdot' if kind == 'part' else 'asmdot' if kind == 'assembly' else 'drwdot'} "
+                f"path, or set Tools > Options > Default Templates in SolidWorks.",
+                SwErrors.swTemplateNotFound, {"tried": tried})
+        logger.info(f"{kind} template ({source}): {template}")
+        doc = self._sw_app.NewDocument(template, 0, 0, 0)
+        if doc is None:
+            return None, template, self._result(False,
+                f"NewDocument returned nothing for template {template}",
+                SwErrors.swFileLoadError, {"template": template, "source": source})
+        return doc, template, None
+
     def create_new_part(self) -> Dict:
         """
         Create a new part document
@@ -43,20 +65,9 @@ class DocumentOperations:
                 if not r["success"]:
                     return r
             
-            # Find part template
-            template = find_template("part")
-            if not template:
-                template = ""  # Let SolidWorks use default
-                logger.info("Using SolidWorks default part template")
-            else:
-                logger.info(f"Using template: {template}")
-            
-            # Create document
-            doc = self._sw_app.NewDocument(template, 0, 0, 0)
-            
-            if doc is None:
-                return self._result(False, "Failed to create part document",
-                                  SwErrors.swFileLoadError)
+            doc, template, err = self._new_document("part")
+            if err:
+                return err
             
             # Set view
             try:
@@ -69,7 +80,7 @@ class DocumentOperations:
             
             return self._result(True, f"Created part: {title}",
                               SwErrors.swSuccess,
-                              {"name": title, "type": "Part"})
+                              {"name": title, "type": "Part", "template": template})
             
         except Exception as e:
             logger.error(f"Create part error: {e}\n{traceback.format_exc()}")
@@ -88,15 +99,9 @@ class DocumentOperations:
                 if not r["success"]:
                     return r
             
-            template = find_template("assembly")
-            if not template:
-                template = ""
-            
-            doc = self._sw_app.NewDocument(template, 0, 0, 0)
-            
-            if doc is None:
-                return self._result(False, "Failed to create assembly",
-                                  SwErrors.swFileLoadError)
+            doc, template, err = self._new_document("assembly")
+            if err:
+                return err
             
             try:
                 doc.ShowNamedView2("*Isometric", 7)
@@ -130,15 +135,9 @@ class DocumentOperations:
                 if not r["success"]:
                     return r
             
-            template = find_template("drawing")
-            if not template:
-                template = ""
-            
-            doc = self._sw_app.NewDocument(template, 0, 0, 0)
-            
-            if doc is None:
-                return self._result(False, "Failed to create drawing",
-                                  SwErrors.swFileLoadError)
+            doc, template, err = self._new_document("drawing")
+            if err:
+                return err
             
             title = self._get_doc_title(doc)
             

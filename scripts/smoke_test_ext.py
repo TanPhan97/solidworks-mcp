@@ -30,13 +30,19 @@ def step(label, r):
 
 
 sw = SolidWorksAutomation()
-step("connect", sw.connect())
-step("new part", sw.create_new_part())
+if not step("connect", sw.connect())["success"]:
+    sys.exit("Cannot connect to SolidWorks - aborting")
+r = step("new part", sw.create_new_part())
+if not r["success"]:
+    print(json.dumps(r.get("data", {}), indent=2))
+    sys.exit("Cannot create a part - fix the template first (see 'tried' above)")
+print("  template:", r["data"].get("template"))
 
 # Base plate
 step("sketch Top", sw.create_sketch("Top"))
 step("rectangle", sw.draw_rectangle(-30, -20, 30, 20))
-step("extrude 10", sw.extrude_sketch(10))
+if not step("extrude 10", sw.extrude_sketch(10))["success"]:
+    sys.exit("Base extrude failed - later steps depend on it, aborting")
 
 # Hole through top face (sketch on face at plate top, y=10 mm in model)
 step("sketch on top face", sw.create_sketch_on_face(15, 10, 5))

@@ -608,3 +608,64 @@ def test_sketch_tools_require_active_sketch(sw):
     a, _ = sw
     r = a.draw_slot(0, 0, 10, 0, 4)
     assert not r["success"] and "No active sketch" in r["message"]
+
+
+# ----------------------------------------------------------------------------
+# Template resolution
+# ----------------------------------------------------------------------------
+
+from solidworks_mcp.automation.templates import resolve_template   # noqa: E402
+
+
+class TplApp:
+    def __init__(self, prefs=None, gdt=""):
+        self.prefs, self.gdt, self.new_docs = prefs or {}, gdt, []
+
+    def GetUserPreferenceStringValue(self, k):
+        return self.prefs.get(k, "")
+
+    def GetDocumentTemplate(self, mode, tpl, paper, w, h):
+        return self.gdt
+
+    def NewDocument(self, t, a, b, c):
+        self.new_docs.append(t)
+        return FakeDoc()
+
+
+def test_template_from_default_pref(tmp_path):
+    t = tmp_path / "Vulcan_Part_mm.prtdot"
+    t.write_bytes(b"x")
+    path, src, _ = resolve_template(TplApp({8: str(t)}), "part")
+    assert path == str(t) and "default" in src
+
+
+def test_template_scan_custom_folder(tmp_path):
+    d = tmp_path / "SW TEMPLATES VERSION 05"
+    (d / "sub").mkdir(parents=True)
+    (d / "sub" / "PART_MM.prtdot").write_bytes(b"x")
+    (d / "ASSY.asmdot").write_bytes(b"x")
+    app = TplApp({0: f"{tmp_path / 'missing'};{d}"})
+    assert resolve_template(app, "part")[0].endswith("PART_MM.prtdot")
+    assert resolve_template(app, "assembly")[0].endswith("ASSY.asmdot")
+
+
+def test_template_config_override_and_missing(tmp_path):
+    t = tmp_path / "x.prtdot"
+    t.write_bytes(b"x")
+    assert resolve_template(TplApp(), "part", str(t))[1] == "config.json"
+    path, _, tried = resolve_template(TplApp(), "drawing", "auto", lambda k: None)
+    assert path is None and len(tried) >= 2
+
+
+def test_create_new_part_uses_resolver(tmp_path):
+    t = tmp_path / "p.prtdot"
+    t.write_bytes(b"x")
+    a = SolidWorksAutomation()
+    app = TplApp({8: str(t)})
+    app.RevisionNumber = "34.3.2"
+    a._sw_app, a._connected = app, True
+    r = a.create_new_part()
+    assert r["success"] and app.new_docs == [str(t)]
+    app.prefs = {}
+    r = a.create_new_part()
+    assert not r["success"] and "tried" in r["data"] and app.new_docs == [str(t)]
