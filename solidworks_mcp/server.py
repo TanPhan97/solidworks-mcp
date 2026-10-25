@@ -3,7 +3,7 @@ SolidWorks MCP Server
 ---------------------
 Main MCP server entry point with all tools.
 
-Version: 4.0.0 (Fixed for SolidWorks 2025)
+Version: 4.1.0 (Fixed for SolidWorks 2025 + extended tools)
 Author: Samsaam Ali Baig
 
 Fixes v4.0.0:
@@ -14,6 +14,14 @@ Fixes v4.0.0:
 - cut_extrude: proper sketch handling
 - NEW: close_sketch tool
 - NEW: get_sketch_status tool for diagnostics
+
+v4.1.0:
+- +33 tools via tools_ext.TOOL_TABLE: topology listing/selection, sketch
+  dimensions/relations/slot/fillet, revolve, shell, linear/circular pattern,
+  mirror, ref planes, dimension edit, suppress, rebuild/undo, mass properties,
+  material, custom properties, export, view capture (image), assembly
+  insert/mate/list
+- Fixed FeatureFillet3 (14 params) and InsertFeatureChamfer (8 params)
 """
 
 import io
@@ -27,13 +35,14 @@ from pathlib import Path
 # MCP imports
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, ImageContent
 
 # Local imports
 from .automation import SolidWorksAutomation
 from .constants import SwErrors
 from .config import get_config, save_config
 from .utils import get_solidworks_info, set_default_unit
+from .tools_ext import ext_tools, has_tool, dispatch as ext_dispatch
 
 # Configure logging
 config = get_config()
@@ -61,7 +70,7 @@ server = Server("solidworks-mcp-server")
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available SolidWorks tools"""
-    return [
+    base_tools = [
         # Connection Tools
         Tool(
             name="connect_solidworks",
@@ -335,6 +344,7 @@ async def list_tools() -> list[Tool]:
             }
         ),
     ]
+    return base_tools + ext_tools()
 
 
 # ============================================================================
@@ -360,7 +370,7 @@ def format_result(r: Dict) -> str:
 # ============================================================================
 
 @server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[TextContent | ImageContent]:
     """Handle MCP tool calls"""
     try:
         logger.info(f"Tool: {name}, Args: {arguments}")
@@ -517,11 +527,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             else:
                 result = _execute_python_fixed(code)
         
+        # Extended tools (tools_ext.TOOL_TABLE)
+        elif has_tool(name):
+            result = ext_dispatch(sw_automation, name, arguments or {})
+        
         else:
             result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
         
         logger.info(f"Result: success={result['success']}")
-        return [TextContent(type="text", text=format_result(result))]
+        image_b64 = None
+        if isinstance(result.get("data"), dict):
+            image_b64 = result["data"].pop("_image_png_b64", None)
+        content = [TextContent(type="text", text=format_result(result))]
+        if image_b64:
+            content.append(ImageContent(type="image", data=image_b64, mimeType="image/png"))
+        return content
         
     except Exception as e:
         logger.error(f"Tool error: {e}\n{traceback.format_exc()}")
@@ -877,7 +897,7 @@ def _get_sketch_status_handler() -> Dict:
 
 async def main():
     """Main entry point for MCP server"""
-    logger.info("Starting SolidWorks MCP Server v4.0.0 (Fixed)...")
+    logger.info("Starting SolidWorks MCP Server v4.1.0...")
     logger.info(f"Log file: {LOG_FILE}")
     
     async with stdio_server() as (read_stream, write_stream):

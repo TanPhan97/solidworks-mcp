@@ -3,10 +3,10 @@
 # Updated: 2026-01-22
 
 # MCP SDK
-mcp>=1.0.0
+mcp>=1.0.0,<2  # server uses the 1.x low-level decorator API
 
-# Async support
-asyncio-compat>=0.1.0
+# Async support: asyncio is part of the standard library (asyncio-compat does not exist on PyPI)
+
 
 # Logging and utilities
 python-dotenv>=1.0.0
@@ -17,3 +17,6 @@ pywin32>=306
 
 # For COM VARIANT types (ByRef parameters)
 # pythoncom is included with pywin32
+
+# Optional: inline PNG for capture_view
+pillow>=10.0

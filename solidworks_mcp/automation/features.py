@@ -448,15 +448,24 @@ class FeatureOperations:
             feat = None
             method_used = ""
             
-            # Method 1: FeatureFillet3
-            try:
-                feat = doc.FeatureManager.FeatureFillet3(
-                    195, radius_m, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-                )
+            # Method 1: FeatureFillet3 — 14 params:
+            # (Options, R1, R2, Rho, Ftyp, VarRadTyp, OverflowType,
+            #  Radii, Dist2Arr, RhoArr, SetBackDistances, PointRadiusArray,
+            #  PointDist2Array, PointRhoArray)
+            # The original code passed 15 args, which always raised.
+            from .com_utils import empty as _empty
+            for arr in (_empty, lambda: 0):
                 if feat:
-                    method_used = "FeatureFillet3"
-            except Exception as e:
-                logger.debug(f"FeatureFillet3 failed: {e}")
+                    break
+                try:
+                    feat = doc.FeatureManager.FeatureFillet3(
+                        195, radius_m, 0.0, 0.0, 0, 0, 0,
+                        arr(), arr(), arr(), arr(), arr(), arr(), arr()
+                    )
+                    if feat:
+                        method_used = "FeatureFillet3"
+                except Exception as e:
+                    logger.debug(f"FeatureFillet3 failed: {e}")
             
             # Method 2: SimpleFillet
             if feat is None:
@@ -502,12 +511,25 @@ class FeatureOperations:
             
             feat = None
             
+            # InsertFeatureChamfer — 8 params:
+            # (Options, ChamferType, Width, Angle, OtherDist,
+            #  VertexChamDist1, VertexChamDist2, VertexChamDist3)
+            # Options 4 = swFeatureChamferTangentPropagation
+            # ChamferType 1 = swChamferAngleDistance
+            # The original code passed 7 args in the wrong order.
             try:
                 feat = doc.FeatureManager.InsertFeatureChamfer(
-                    1, dist_m, angle_rad, dist_m, 0, False, False
+                    4, 1, dist_m, angle_rad, 0.0, 0.0, 0.0, 0.0
                 )
             except Exception as e:
-                logger.debug(f"InsertFeatureChamfer failed: {e}")
+                logger.debug(f"InsertFeatureChamfer (8p) failed: {e}")
+            if feat is None:
+                try:
+                    feat = doc.FeatureManager.InsertFeatureChamfer(
+                        1, dist_m, angle_rad, dist_m, 0, False, False
+                    )
+                except Exception as e:
+                    logger.debug(f"InsertFeatureChamfer (legacy) failed: {e}")
             
             if feat is None:
                 return self._result(False,

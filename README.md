@@ -23,7 +23,7 @@
 
 ## ✨ Features
 
-- ✅ **22 Tools** covering parts, sketches, features, and utilities
+- ✅ **58 Tools** covering parts, sketches, features, selection, parametric edit, properties, export and assemblies
 - ✅ **SolidWorks 2023–2025 Compatible** with version-aware API fallbacks
 - ✅ **Auto-detects SolidWorks** installation via Windows registry
 - ✅ **Multi-unit support** — mm, cm, inch, meter, foot
@@ -60,6 +60,60 @@
 | **Features** | `list_features` | List all features in the model |
 | **Utilities** | `set_units` | Change default unit (mm/inch/cm/m/ft) |
 | **Utilities** | `execute_python` | Execute custom Python code in SW context |
+
+---
+
+## 🧩 Extended Tools (v4.1) — +33 tools
+
+Registered from `solidworks_mcp/tools_ext.py` (declarative table, one line per tool → automation method).
+
+| Group | Tool | Purpose |
+|---|---|---|
+| **Selection** | `list_edges` | Edges with stable index: type (line/circle/arc), length, midpoint, direction, radius |
+| | `list_faces` | Faces: type, area, normal / radius, point on face |
+| | `select_edges` | By index or filter: `parallel_to`, `axis_parallel_to`, `radius`, `min/max_length`, `on_face_index` |
+| | `select_faces` | By index or filter: `face_type`, `normal` (`z`, `+z`, `-z`…), `radius`, `min_area` |
+| | `select_entity` | Generic SelectByID2 by name / model point / sketch point |
+| | `clear_selection`, `get_selection` | Selection housekeeping / inspection |
+| **Sketch** | `draw_centerline`, `draw_slot`, `sketch_fillet` | Geometry |
+| | `add_sketch_dimension` | Smart dimension (length / diameter / radius / distance / angle) with driving value |
+| | `add_sketch_relation` | horizontal, vertical, coincident, concentric, tangent, parallel, perpendicular, collinear, equal, midpoint, symmetric, fixed |
+| **Features** | `revolve` | Boss / cut revolve, mid-plane, thin |
+| | `shell` | Remove faces by index or normal |
+| | `linear_pattern`, `circular_pattern` | Direction / axis as edge, face, axis or plane reference |
+| | `mirror` | Features or bodies about plane / planar face |
+| | `create_ref_plane` | Offset, angle-through-axis, mid-plane |
+| **Parametric** | `list_dimensions`, `set_dimension` | Edit `D1@Sketch1` etc., rebuild, report rebuild errors |
+| | `suppress_feature`, `rebuild`, `undo` | Feature state / recovery |
+| **Properties** | `get_mass_properties` | Mass, volume, area, density, CoM, principal MOI |
+| | `set_material` | Library material by exact name |
+| | `set_custom_property`, `get_custom_properties` | PartNo / Description / Revision … |
+| **Output** | `export_document` | STEP, IGES, Parasolid, STL, 3MF, eDrawings, PDF/DXF (copy; active file unchanged) |
+| | `set_view`, `capture_view` | Standard views; viewport returned **as an image** for visual checks |
+| **Assembly** | `insert_component`, `add_mate`, `list_components` | Coincident / concentric / parallel / perpendicular / tangent / distance / angle / lock |
+
+**Reference spec** (used by patterns, mirror, planes, revolve axis):
+`{"plane": "Front"}` · `{"edge_index": 12}` · `{"face_index": 6}` · `{"name": "Axis1", "type": "AXIS"}` · `{"point": [x, y, z], "type": "FACE"}`
+
+**Typical flow**
+```
+list_edges(parallel_to="z")          → see vertical edges
+select_edges(parallel_to="z")        → select them
+fillet_edges(radius=3)
+list_faces(face_type="cylinder")     → hole face index 6
+circular_pattern(features=["Cut-Extrude1"], axis={"face_index": 6}, count=6)
+set_material("6061-T6 (SS)"); get_mass_properties()
+export_document("C:/out/part.step"); capture_view("isometric")
+```
+
+**Fixes in v4.1**
+- `fillet_edges`: `FeatureFillet3` now called with its 14 parameters (was 15 → always failed, silently falling back).
+- `chamfer_edges`: `InsertFeatureChamfer` now called with 8 parameters in documented order (was 7, wrong order).
+- `requirements.txt`: `mcp<2` — the server uses the 1.x low-level decorator API, which mcp 2.x removed.
+
+**Tests**
+- Offline (any OS, fake COM): `python -m pytest solidworks_mcp/tests -q`
+- Live (Windows + SolidWorks running): `python scripts\smoke_test_ext.py C:\temp\swmcp_out`
 
 ---
 
