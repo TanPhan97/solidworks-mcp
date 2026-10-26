@@ -606,7 +606,7 @@ class DrawingOperations:
             if t is None:
                 return self._result(False, "InsertBomTable4 returned nothing", SwErrors.swFeatureError,
                                     {"template": tpl})
-            rows = int(cu.try_call(cu.try_call(t, "GetTableAnnotation") or t, "RowCount", default=0) or 0)
+            rows = int(cu.try_call(t, "RowCount", default=0) or 0)
             cu.rebuild(drw)
             return self._result(True, f"BOM ({bom_type}) inserted, {rows} row(s)", SwErrors.swSuccess,
                                 {"template": tpl, "rows": rows, "view": str(cu.try_call(v, "GetName2"))})

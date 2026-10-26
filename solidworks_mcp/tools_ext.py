@@ -91,7 +91,10 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
                       ["filepath"], "open_document"),
     "save_document": ("Save the active document; filepath = Save As (.sldprt/.sldasm/.slddrw).",
                       _p(filepath={"type": "string"}), [], "save_document"),
-    "close_document": ("Close the active document.", _p(save={"type": "boolean", "default": False}), [],
+    "close_document": ("Close the active document. A document with unsaved changes is refused unless "
+                       "save=true (save first) or discard_changes=true.",
+                       _p(save={"type": "boolean", "default": False},
+                          discard_changes={"type": "boolean", "default": False}), [],
                        "close_document"),
     "get_document_info": ("Title, path, type and configuration of the active document.", {}, [],
                           "get_document_info"),

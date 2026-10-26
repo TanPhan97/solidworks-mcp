@@ -1067,3 +1067,48 @@ def test_save_copy_clears_selection_and_pdf_view(tmp_path):
     app = App()
     ok, errs, _ = cu.save_copy(app, Doc(), str(tmp_path / "a.pdf"))
     assert ok and "clear" in calls and (617, False) in calls and app.prefs[617] is True
+
+
+def test_close_document_never_drops_changes_silently():
+    closed = []
+
+    class Doc:
+        def __init__(self, dirty, path):
+            self.dirty, self.path, self.saved = dirty, path, False
+
+        def GetSaveFlag(self):
+            return self.dirty
+
+        def GetTitle(self):
+            return "P1"
+
+        def GetPathName(self):
+            return self.path
+
+        def GetType(self):
+            return 1
+
+        def Save3(self, opts, e, w):
+            self.saved = True
+            return True
+
+    class App:
+        RevisionNumber = "34.3.2"
+
+        def __init__(self, d):
+            self.ActiveDoc = d
+
+        def CloseDoc(self, t):
+            closed.append(t)
+
+    a = SolidWorksAutomation()
+    d = Doc(True, r"C:\x\P1.SLDPRT")
+    a._sw_app, a._connected = App(d), True
+    r = a.close_document()
+    assert not r["success"] and not closed and "unsaved" in r["message"]
+    assert a.close_document(save=True)["success"] and d.saved and closed == ["P1"]
+    closed.clear()
+    d2 = Doc(True, "")
+    a._sw_app = App(d2)
+    assert not a.close_document(save=True)["success"] and not closed
+    assert a.close_document(discard_changes=True)["success"] and closed == ["P1"]

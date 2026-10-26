@@ -235,35 +235,37 @@ class DocumentOperations:
             logger.error(f"Save error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFileSaveError)
 
-    def close_document(self, save: bool = False) -> Dict:
+    def close_document(self, save: bool = False, discard_changes: bool = False) -> Dict:
         """
-        Close the active document
-        
-        Args:
-            save: Save before closing
-        
-        Returns:
-            Result dictionary
+        Close the active document. Unsaved changes are never dropped silently:
+        save=True saves first (silent); otherwise a modified document is only
+        closed with discard_changes=True.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return self._result(True, "No document to close")
-            
             title = self._get_doc_title(doc)
-            
-            if save:
-                doc.Save3(0, 0, 0)
-            
+            dirty = bool(cu.try_call(doc, "GetSaveFlag", default=False))
+            if save and dirty:
+                if not self._get_doc_path(doc):
+                    return self._result(False, f"'{title}' was never saved: save_document(filepath) first",
+                                        SwErrors.swInvalidInput)
+                e, w = cu.byref_int(0), cu.byref_int(0)
+                r = doc.Save3(1, e, w)
+                if not bool(r[0] if isinstance(r, tuple) else r):
+                    return self._result(False, f"Save failed (swFileSaveError {getattr(e, 'value', '?')}); "
+                                               "document left open", SwErrors.swFileSaveError)
+            elif dirty and not discard_changes:
+                return self._result(False, f"'{title}' has unsaved changes: use save=true, or "
+                                           "discard_changes=true to close without saving",
+                                    SwErrors.swInvalidInput, {"document": title})
             self._sw_app.CloseDoc(title)
-            
-            return self._result(True, f"Closed: {title}",
-                              SwErrors.swSuccess, {"document": title})
-            
+            return self._result(True, f"Closed: {title}", SwErrors.swSuccess, {"document": title})
         except Exception as e:
             logger.error(f"Close error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
-    
+
     def get_document_info(self) -> Dict:
         """
         Get information about the active document
