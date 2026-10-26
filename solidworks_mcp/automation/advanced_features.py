@@ -356,7 +356,7 @@ class AdvancedFeatureOperations:
                                     SwErrors.swSelectionError)
             if mirror_bodies:
                 sel_mgr = cu.call(doc, "SelectionManager")
-                for body in self._get_bodies(doc):
+                for body in self._get_bodies(doc, include_surfaces=False):
                     sd = cu.call(sel_mgr, "CreateSelectData")
                     sd.Mark = 256
                     body.Select2(True, sd)
