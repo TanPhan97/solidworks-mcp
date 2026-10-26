@@ -21,6 +21,11 @@ from .detail_features import DetailFeatureOperations
 from .core_ops import CoreOperations
 from .part_plus import PartPlusOperations
 from .assembly_plus import AssemblyPlusOperations
+from .part_mold import PartMoldOperations
+from .assembly_tools import AssemblyToolsOperations
+from .drawing_plus import DrawingPlusOperations
+from .sheet_metal import SheetMetalOperations
+from .surfaces import SurfaceOperations
 
 
 class SolidWorksAutomation(CoreOperations, _BaseAutomation, DocumentOperations,
@@ -30,7 +35,10 @@ class SolidWorksAutomation(CoreOperations, _BaseAutomation, DocumentOperations,
                            AssemblyOperations, DrawingOperations,
                            SweepLoftOperations, BatchImportOperations,
                            EditOperations, DetailFeatureOperations,
-                           PartPlusOperations, AssemblyPlusOperations):
+                           PartPlusOperations, AssemblyPlusOperations,
+                           PartMoldOperations, AssemblyToolsOperations,
+                           DrawingPlusOperations, SheetMetalOperations,
+                           SurfaceOperations):
     """
     Complete SolidWorks automation class
     

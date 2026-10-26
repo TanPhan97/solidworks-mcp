@@ -239,7 +239,7 @@ class PartPlusOperations:
             for i, spec in enumerate(list(entities) + [mirror_line]):
                 if not self._select_sketch_entity(doc, spec, i > 0, 0, unit):
                     return self._result(False, f"Sketch entity not found: {spec}", SwErrors.swSelectionError)
-            doc.SketchMirror()
+            cu.call(doc, "SketchMirror")
             doc.ClearSelection2(True)
             return self._result(True, f"Mirrored {len(entities)} entit(y/ies)", SwErrors.swSuccess)
         except RuntimeError as e:

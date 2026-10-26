@@ -1,7 +1,7 @@
 # SolidWorks MCP Server
 
 Control SolidWorks from Claude in plain language: parts, assemblies, drawings, exports.
-**105 tools** · tested live on **SOLIDWORKS 2026** · Windows · Python 3.10+
+**132 tools** — parts, surfaces, sheet metal, assemblies, drawings · v4.4.0 · tested live on **SOLIDWORKS 2026** · Windows · Python 3.10+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio-green.svg)](https://modelcontextprotocol.io/)
@@ -9,10 +9,12 @@ Control SolidWorks from Claude in plain language: parts, assemblies, drawings, e
 
 | | | |
 |:-:|:-:|:-:|
-| ![part](docs/plate.png) | ![sweep](docs/sweep.png) | ![assembly](docs/asmplus.png) |
-| Hole Wizard, fillet, draft | Sweep along line + arc | Component pattern, mates |
+| ![part](docs/plate.png) | ![surface](docs/surf_thicken.png) | ![sheet metal](docs/sheet.png) |
+| Hole Wizard, fillet, draft | Surface extrude + thicken | Base + edge flange |
+| ![sweep](docs/sweep.png) | ![assembly](docs/asmplus.png) | ![mates](docs/asmtools.png) |
+| Sweep along line + arc | Component pattern, exploded view | Slot / hinge / width / gear mates |
 
-> 📘 Full manual (Vietnamese, Word): [docs/SolidWorks_MCP_Huong_dan.docx](docs/SolidWorks_MCP_Huong_dan.docx)
+> 📘 Full manual (Vietnamese, Word): [docs/SolidWorks_MCP_Huong_dan.docx](docs/SolidWorks_MCP_Huong_dan.docx) · 📝 [CHANGELOG](CHANGELOG.md)
 
 ## Quick start
 
@@ -39,19 +41,26 @@ If the server does not show up, pass the file from **Settings → Developer → 
 - *"New assembly with plate and cover, mate them, pattern the cover 3× at 100 mm, check interference, make an exploded view."*
 - *"Drawing of plate.SLDPRT: 3 views + iso, section A-A, detail at 3:1, model dimensions, center marks, then export PDF."*
 - *"Export every part in D:\Project to STEP and STL, drawings to PDF."*
+- *"Curved shell: extrude an R50 arc surface 40 mm and thicken it 2 mm; knit these surfaces into a solid."*
+- *"Sheet metal 80×50, t=1.5, R2; 20 mm edge flange on the front edge; export the flat pattern to DXF."*
+- *"Pin in the slot, second pin hinged in the hole, gears 1:2; export the BOM to CSV and Pack and Go to D:\Release."*
+- *"Drawing: hole table, revision A 'INITIAL RELEASE', auxiliary view of the chamfer."*
 
 ## Tools
 
 | Group | Tools |
 |---|---|
 | **Connection & documents** (12) | `connect_solidworks`, `get_solidworks_info`, `create_new_part`, `create_new_assembly`, `open_document`, `import_file`, `save_document`, `close_document`, `activate_document`, `get_document_info`, `list_open_documents`, `set_units` |
-| **Sketch** (21) | `create_sketch`, `create_sketch_on_face`, `close_sketch`, `get_sketch_status`, `draw_line`, `draw_circle`, `draw_rectangle`, `draw_arc`, `draw_polygon`, `draw_centerline`, `draw_slot`, `draw_spline`, `draw_ellipse`, `sketch_fillet`, `convert_entities`, `offset_entities`, `sketch_mirror`, `sketch_pattern`, `set_construction`, `add_sketch_dimension`, `add_sketch_relation` |
-| **Part features** (17) | `extrude`, `extrude_sketch`, `cut_extrude`, `revolve`, `loft`, `sweep`, `fillet_edges`, `chamfer_edges`, `shell`, `rib`, `draft`, `hole_wizard`, `linear_pattern`, `circular_pattern`, `mirror`, `create_ref_plane`, `create_ref_axis` |
+| **Sketch** (22) | `create_sketch`, `create_sketch_on_face`, `close_sketch`, `get_sketch_status`, `draw_line`, `draw_circle`, `draw_rectangle`, `draw_arc`, `draw_polygon`, `draw_centerline`, `draw_slot`, `draw_spline`, `draw_ellipse`, `sketch_fillet`, `convert_entities`, `offset_entities`, `sketch_mirror`, `sketch_pattern`, `set_construction`, `add_sketch_dimension`, `add_sketch_relation`, `sketch_text` |
+| **Part features** (19) | `extrude`, `extrude_sketch`, `cut_extrude`, `revolve`, `loft`, `sweep`, `fillet_edges`, `chamfer_edges`, `shell`, `rib`, `draft`, `hole_wizard`, `linear_pattern`, `circular_pattern`, `mirror`, `create_ref_plane`, `create_ref_axis`, `scale_part`, `cosmetic_thread` |
+| **Multi-body** (4) | `list_bodies`, `combine_bodies`, `split_body`, `delete_body` |
+| **Surface** (9) | `surface_extrude`, `surface_revolve`, `planar_surface`, `offset_surface`, `loft_surface`, `knit_surfaces`, `thicken_surface`, `cut_with_surface`, `delete_face` |
+| **Sheet metal** (4) | `base_flange`, `edge_flange`, `flatten`, `export_flat_pattern` |
 | **Selection & topology** (8) | `list_edges`, `list_faces`, `select_edges`, `select_faces`, `select_entity`, `clear_selection`, `get_selection`, `measure` |
 | **Parametric edit** (15) | `list_features`, `get_feature_info`, `edit_feature`, `list_dimensions`, `set_dimension`, `list_equations`, `set_equation`, `list_configurations`, `add_configuration`, `activate_configuration`, `suppress_feature`, `delete_feature`, `rename_feature`, `rebuild`, `undo` |
 | **Properties & output** (8) | `get_mass_properties`, `set_material`, `set_custom_property`, `get_custom_properties`, `export_document`, `batch_export`, `set_view`, `capture_view` |
-| **Assembly** (11) | `insert_component`, `add_mate`, `list_components`, `list_mates`, `move_component`, `fix_component`, `set_component_state`, `replace_component`, `component_pattern`, `check_interference`, `create_exploded_view` |
-| **Drawing** (12) | `create_drawing`, `list_drawing_views`, `add_drawing_view`, `add_section_view`, `add_detail_view`, `insert_model_annotations`, `insert_center_marks`, `insert_bom`, `auto_balloon`, `add_note`, `add_sheet`, `activate_sheet` |
+| **Assembly** (14) | `insert_component`, `add_mate`, `list_components`, `list_mates`, `move_component`, `fix_component`, `set_component_state`, `replace_component`, `component_pattern`, `check_interference`, `create_exploded_view`, `add_advanced_mate`, `export_bom`, `pack_and_go` |
+| **Drawing** (16) | `create_drawing`, `list_drawing_views`, `add_drawing_view`, `add_section_view`, `add_detail_view`, `insert_model_annotations`, `insert_center_marks`, `insert_bom`, `auto_balloon`, `add_note`, `add_sheet`, `activate_sheet`, `add_revision`, `insert_hole_table`, `add_auxiliary_view`, `add_broken_out_section` |
 | **Advanced** (1) | `execute_python` |
 
 All lengths take an optional `unit` (mm default; cm, m, inch, ft). Angles are in degrees.
@@ -70,8 +79,8 @@ Logs go to `solidworks_mcp/solidworks_mcp.log`; stdout is reserved for MCP.
 ## Testing
 
 ```bat
-.venv\Scripts\python.exe -m pytest -q solidworks_mcp\tests          :: offline, fake COM (48 tests)
-.venv\Scripts\python.exe scripts\smoke_test.py D:\swmcp_test        :: live, SolidWorks open (126 checks)
+.venv\Scripts\python.exe -m pytest -q solidworks_mcp\tests          :: offline, fake COM (51 tests)
+.venv\Scripts\python.exe scripts\smoke_test.py D:\swmcp_test        :: live, SolidWorks open (216 checks, 13 sections)
 ```
 
 Use a new output folder for each smoke run. SolidWorks cannot open two files with the same name.
@@ -84,6 +93,8 @@ Use a new output folder for each smoke run. SolidWorks cannot open two files wit
 | "No part template found" | Set `part_template` in config.json or a default template in SolidWorks Options |
 | A tool hangs or times out | A modal dialog is open in SolidWorks: close it. The known dialogs are suppressed in code |
 | "Critically low on memory" | Too many open documents: close some |
+| Advanced mate reports over-defined | The first inserted component is fixed: `fix_component(names, fixed=false)` |
+| New tools do not appear | Quit and reopen Claude Desktop |
 
 ## Safety
 
@@ -95,8 +106,8 @@ The server never calls CloseAllDocuments, and batch export never closes document
 ```
 solidworks_mcp_server.py      entry point (launched by Claude Desktop)
 solidworks_mcp/server.py      MCP server: list_tools / call_tool
-solidworks_mcp/tools_ext.py   tool registry: schema + dispatch for all 105 tools
-solidworks_mcp/automation/    SolidWorks logic (documents, sketch, features, drawing, assembly…)
+solidworks_mcp/tools_ext.py   tool registry: schema + dispatch for all 132 tools
+solidworks_mcp/automation/    SolidWorks logic (sketch, features, surfaces, sheet metal, assembly, drawing…)
 solidworks_mcp/tests/         offline unit tests
 scripts/                      smoke test, Claude Desktop registration
 ```

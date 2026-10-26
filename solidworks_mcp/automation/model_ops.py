@@ -179,7 +179,7 @@ class ModelOperations:
             doc.ClearSelection2(True)
             feat.Select2(False, 0)
             ok, _ = cu.first_ok(
-                (lambda: doc.EditSuppress2()) if suppress else (lambda: doc.EditUnsuppress2()),
+                lambda: cu.call(doc, "EditSuppress2" if suppress else "EditUnsuppress2"),
                 # swFeatureSuppressionAction_e: 0 suppress, 1 unsuppress; 1 = this configuration
                 lambda: feat.SetSuppression2(0 if suppress else 1, 1, cu.empty()),
                 log_prefix="Suppress")

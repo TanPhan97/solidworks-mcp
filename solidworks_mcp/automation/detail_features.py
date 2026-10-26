@@ -239,7 +239,7 @@ class DetailFeatureOperations:
                                         f"the other {len(pts) - 1}", SwErrors.swSuccess, {"feature": name})
                 doc.ClearSelection2(True)
                 sub.Select2(False, 0)
-                doc.EditSketch()
+                cu.call(doc, "EditSketch")
                 sm = doc.SketchManager
                 for p in pts[1:]:
                     x, y, _ = cu.model_to_sketch(sk, p)

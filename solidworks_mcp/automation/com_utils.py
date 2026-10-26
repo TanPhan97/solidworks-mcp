@@ -368,7 +368,7 @@ def rebuild(doc, force: bool = False) -> bool:
             return True
         if force:
             return bool(doc.ForceRebuild3(False))
-        return bool(doc.EditRebuild3())
+        return bool(call(doc, "EditRebuild3"))
     except Exception as e:  # noqa: BLE001
         logger.debug(f"rebuild failed: {e}")
         return False

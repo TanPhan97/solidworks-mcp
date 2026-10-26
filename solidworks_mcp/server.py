@@ -4,7 +4,7 @@ SolidWorks MCP Server
 Thin MCP layer: every tool is declared once in tools_ext.TOOL_TABLE and
 implemented as a method of automation.SolidWorksAutomation.
 
-Version: 4.3.0
+Version: 4.4.0
 Original author: Samsaam Ali Baig (v3/v4, MIT). Extended by Tan Phan.
 """
 
@@ -22,7 +22,7 @@ from .automation import SolidWorksAutomation
 from .config import get_config
 from .tools_ext import ext_tools, has_tool, dispatch
 
-__version__ = "4.3.0"
+__version__ = "4.4.0"
 
 config = get_config()
 LOG_FILE = Path(__file__).parent / config.log_file

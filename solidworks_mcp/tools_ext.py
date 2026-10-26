@@ -318,7 +318,7 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
 
     # ------------------------------------------------------------ assembly
     "insert_component": (
-        "Insert a part/sub-assembly file into the active assembly at (x, y, z).",
+        "Insert a part/sub-assembly file into the active assembly; its bounding-box centre is placed at (x, y, z).",
         _p(filepath={"type": "string"}, x={"type": "number", "default": 0},
            y={"type": "number", "default": 0}, z={"type": "number", "default": 0},
            config={"type": "string", "default": ""}, unit=UNIT), ["filepath"], "insert_component"),
@@ -594,6 +594,153 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
                                holes={"type": "boolean", "default": True},
                                fillets={"type": "boolean", "default": False},
                                slots={"type": "boolean", "default": True}), [], "insert_center_marks"),
+
+    # ------------------------------------------------------------ v4.4: part (mold / 3D print)
+    "sketch_text": ("Text in the active sketch at sketch point (x, y), char height, optional font/bold/italic. "
+                    "Extrude or cut it afterwards (part numbers, logos).",
+                    _p(text={"type": "string"}, x={"type": "number", "default": 0}, y={"type": "number", "default": 0},
+                       height={"type": "number", "default": 5}, font={"type": "string"},
+                       bold={"type": "boolean", "default": False}, italic={"type": "boolean", "default": False},
+                       alignment={"type": "string", "enum": ["left", "center", "right", "full"], "default": "left"},
+                       width_factor={"type": "number", "default": 100}, spacing={"type": "number", "default": 0},
+                       unit=UNIT), ["text"], "sketch_text"),
+    "scale_part": ("Scale feature: uniform factor (e.g. 1.006 = 0.6 % mold shrinkage) or per-axis x/y/z, "
+                   "about centroid or origin. Reports the volume ratio.",
+                   _p(factor={"type": "number"}, x={"type": "number"}, y={"type": "number"}, z={"type": "number"},
+                      about={"type": "string", "enum": ["centroid", "origin"], "default": "centroid"}),
+                   [], "scale_part"),
+    "cosmetic_thread": ("Cosmetic thread on a circular edge: size 'M6x1.0' / 'M6' (external: minor diameter, "
+                        "internal: major) or explicit diameter; blind depth, up_to_next or through.",
+                        _p(edge=REF_SPEC, size={"type": "string"}, diameter={"type": "number"},
+                           depth={"type": "number"},
+                           end={"type": "string", "enum": ["blind", "up_to_next", "through"], "default": "blind"},
+                           internal={"type": "boolean", "default": False}, callout={"type": "string"}, unit=UNIT),
+                        ["edge"], "cosmetic_thread"),
+    "list_bodies": ("Bodies of the active part: index, name, faces (+ volume, centroid for solids). "
+                    "kind solid (indices for combine/delete_body), surface (names for knit/thicken/cut) or all.",
+                    _p(kind={"type": "string", "enum": ["solid", "surface", "all"], "default": "solid"}, unit=UNIT),
+                    [], "list_bodies"),
+    "combine_bodies": ("Combine bodies: add, subtract (tool bodies from main) or common. Bodies by name or index.",
+                       _p(main_body={"type": ["string", "integer"]},
+                          tool_bodies={"type": "array", "items": {"type": ["string", "integer"]}},
+                          operation={"type": "string", "enum": ["add", "subtract", "common"], "default": "add"}),
+                       ["main_body", "tool_bodies"], "combine_bodies"),
+    "split_body": ("Split the solid bodies with a plane or planar face (reference spec), e.g. a mold core/cavity "
+                   "or a part too large for the printer.", _p(tool=REF_SPEC, unit=UNIT), ["tool"], "split_body"),
+    "delete_body": ("Delete bodies (or keep only them with keep=true). Names or indices from list_bodies.",
+                    _p(bodies={"type": "array", "items": {"type": ["string", "integer"]}},
+                       keep={"type": "boolean", "default": False}), ["bodies"], "delete_body"),
+
+    # ------------------------------------------------------------ v4.4: sheet metal
+    "base_flange": ("Sheet-metal base flange from the last sketch (or `sketch`): thickness, bend radius "
+                    "(default = thickness), K-factor. Closed profile = flat plate; open profile needs depth.",
+                    _p(thickness={"type": "number"}, bend_radius={"type": "number"},
+                       k_factor={"type": "number", "default": 0.5}, sketch={"type": "string"},
+                       depth={"type": "number"}, reverse={"type": "boolean", "default": False},
+                       relief={"type": "string", "enum": ["rectangular", "tear", "obround"], "default": "rectangular"},
+                       unit=UNIT), ["thickness"], "base_flange"),
+    "edge_flange": ("Edge flange on a linear sheet-metal edge (reference spec): length, angle (deg), "
+                    "bend radius (default: part default), position.",
+                    _p(edge=REF_SPEC, length={"type": "number"}, angle={"type": "number", "default": 90},
+                       bend_radius={"type": "number"},
+                       position={"type": "string", "enum": ["material_inside", "material_outside", "bend_outside",
+                                                            "bend_centerline"], "default": "material_inside"},
+                       flip={"type": "boolean", "default": False}, unit=UNIT), ["edge", "length"], "edge_flange"),
+    "flatten": ("Show the sheet-metal flat pattern (flat=true) or the formed part.",
+                _p(flat={"type": "boolean", "default": True}), [], "flatten"),
+    "export_flat_pattern": ("Export the flat pattern of the active saved sheet-metal part to DXF/DWG "
+                            "(outline + bend lines) for laser / punch.",
+                            _p(filepath={"type": "string"}, bend_lines={"type": "boolean", "default": True}),
+                            ["filepath"], "export_flat_pattern"),
+
+    # ------------------------------------------------------------ v4.4: assembly
+    "add_advanced_mate": ("Advanced / mechanical mates. symmetric: entities[2] + symmetry_plane. width: "
+                          "width_entities[2] (groove faces) + tab_entities[2], constraint centered|free|distance|percent. "
+                          "gear: entities[2] cylindrical faces, ratio [n, m], reverse. slot: entities [slot face, pin face], "
+                          "constraint free|centered|distance|percent. hinge: entities [cyl1, cyl2, face1, face2] (concentric pair "
+                          "+ coincident pair). limit_distance / limit_angle: entities[2], value, min_value, max_value. "
+                          "Use faces (e.g. {\"point\": [x,y,z], \"type\": \"FACE\"}); symmetric works best with two "
+                          "mirror faces. Note: insert_component centres the component's bounding box at (x, y, z).",
+                          _p(mate_type={"type": "string", "enum": ["symmetric", "width", "gear", "slot", "hinge",
+                                                                   "limit_distance", "limit_angle"]},
+                             entities={"type": "array", "items": MATE_ENTITY}, symmetry_plane=MATE_ENTITY,
+                             width_entities={"type": "array", "items": MATE_ENTITY},
+                             tab_entities={"type": "array", "items": MATE_ENTITY},
+                             constraint={"type": "string", "enum": ["centered", "free", "distance", "percent"]},
+                             distance={"type": "number"}, percent={"type": "number"},
+                             ratio={"type": "array", "items": {"type": "number"}},
+                             reverse={"type": "boolean", "default": False},
+                             min_value={"type": "number"}, max_value={"type": "number"}, value={"type": "number"},
+                             alignment={"type": "string", "enum": ["aligned", "anti_aligned", "closest"],
+                                        "default": "closest"}, unit=UNIT),
+                          ["mate_type"], "add_advanced_mate"),
+    "export_bom": ("BOM of the active assembly to CSV (opens in Excel): parts_only (total quantities), top_level "
+                   "or indented. Columns: Item, Level, File, Configuration, Qty + custom properties.",
+                   _p(filepath={"type": "string"},
+                      mode={"type": "string", "enum": ["parts_only", "top_level", "indented"], "default": "parts_only"},
+                      properties=STR_LIST, include_suppressed={"type": "boolean", "default": False}),
+                   ["filepath"], "export_bom"),
+    "pack_and_go": ("Pack and Go: copy the active saved model with all referenced files to a folder, "
+                    "optional prefix/suffix and drawings.",
+                    _p(destination={"type": "string"}, prefix={"type": "string", "default": ""},
+                       suffix={"type": "string", "default": ""},
+                       include_drawings={"type": "boolean", "default": False},
+                       flatten={"type": "boolean", "default": True}), ["destination"], "pack_and_go"),
+
+    # ------------------------------------------------------------ v4.4: drawing
+    "add_revision": ("Add a revision row (e.g. 'A', date automatic) with description / approved; inserts a "
+                     "revision table if the sheet has none (company template preferred).",
+                     _p(revision={"type": "string"}, description={"type": "string", "default": ""},
+                        approved={"type": "string", "default": ""}, template={"type": "string"},
+                        anchor={"type": "string", "enum": ["top_left", "top_right", "bottom_left", "bottom_right"],
+                                "default": "top_right"}), ["revision"], "add_revision"),
+    "insert_hole_table": ("Hole table for a view: holes of the face with most holes, origin at the view's "
+                          "bottom-left vertex, tags from start_tag. x, y = table position (sheet mm).",
+                          _p(view={"type": "string"}, x={"type": "number"}, y={"type": "number"},
+                             template={"type": "string"}, start_tag={"type": "string", "default": "A"}),
+                          [], "insert_hole_table"),
+    "add_auxiliary_view": ("Auxiliary view normal to an inclined edge of a view (longest inclined edge, or the "
+                           "edge nearest edge_point [x, y] sheet mm). Placed without overlapping.",
+                           _p(parent_view={"type": "string"}, edge_point={"type": "array", "items": {"type": "number"}},
+                              label={"type": "string"}), ["parent_view"], "add_auxiliary_view"),
+    "add_broken_out_section": ("Circular broken-out section in a view: center [x, y] and radius on the sheet (mm), "
+                               "cut depth in model mm.",
+                               _p(view={"type": "string"}, center={"type": "array", "items": {"type": "number"}},
+                                  radius={"type": "number"}, depth={"type": "number"}),
+                               ["view", "center", "radius", "depth"], "add_broken_out_section"),
+
+    # ------------------------------------------------------------ v4.4: surfaces
+    "surface_extrude": ("Extruded surface (no caps) from the last sketch or `sketch` (open or closed profile): "
+                        "depth, optional depth2 for the 2nd direction, end condition blind / mid_plane.",
+                        _p(depth={"type": "number"}, sketch={"type": "string"},
+                           end_condition={"type": "string", "enum": ["blind", "mid_plane"], "default": "blind"},
+                           depth2={"type": "number"}, reverse={"type": "boolean", "default": False}, unit=UNIT),
+                        ["depth"], "surface_extrude"),
+    "surface_revolve": ("Revolved surface from the last sketch (needs a centerline as axis).",
+                        _p(angle={"type": "number", "default": 360}, sketch={"type": "string"},
+                           reverse={"type": "boolean", "default": False}), [], "surface_revolve"),
+    "planar_surface": ("Planar surface bounded by a closed planar sketch (last sketch or `sketch`).",
+                       _p(sketch={"type": "string"}), [], "planar_surface"),
+    "offset_surface": ("Offset surface from faces (reference specs, e.g. {\"face_index\": n}); distance 0 = copy.",
+                       _p(faces={"type": "array", "items": REF_SPEC}, distance={"type": "number"}, reverse={"type": "boolean", "default": False},
+                          unit=UNIT), ["faces", "distance"], "offset_surface"),
+    "loft_surface": ("Lofted surface through >= 2 profile sketches in order (open or closed).",
+                     _p(profiles=STR_LIST, closed={"type": "boolean", "default": False}), ["profiles"], "loft_surface"),
+    "knit_surfaces": ("Knit surface bodies (all if none given). form_solid=true turns a closed set into a solid.",
+                      _p(surfaces=STR_LIST, form_solid={"type": "boolean", "default": False},
+                         tolerance={"type": "number", "default": 0.0025}, unit=UNIT), [], "knit_surfaces"),
+    "thicken_surface": ("Thicken a surface body (name from list_bodies kind='surface') into a solid.",
+                        _p(surface={"type": "string"}, thickness={"type": "number"},
+                           side={"type": "string", "enum": ["side1", "side2", "both"], "default": "side1"},
+                           merge={"type": "boolean", "default": True}, unit=UNIT),
+                        ["surface", "thickness"], "thicken_surface"),
+    "cut_with_surface": ("Cut the solid bodies with a surface body; flip keeps the other side. Reports the kept "
+                         "volume ratio.", _p(surface={"type": "string"}, flip={"type": "boolean", "default": False}),
+                         ["surface"], "cut_with_surface"),
+    "delete_face": ("Delete faces (reference specs): patch (heal, stays solid, e.g. remove a pocket or fillet), "
+                    "fill, or delete (body becomes a surface).",
+                    _p(faces={"type": "array", "items": REF_SPEC}, mode={"type": "string", "enum": ["patch", "fill", "delete"], "default": "patch"},
+                       unit=UNIT), ["faces"], "delete_face"),
 }
 
 
@@ -607,10 +754,15 @@ CATEGORIES: List[Tuple[str, List[str]]] = [
                 "draw_circle", "draw_rectangle", "draw_arc", "draw_polygon", "draw_centerline", "draw_slot",
                 "draw_spline", "draw_ellipse", "sketch_fillet", "convert_entities", "offset_entities",
                 "sketch_mirror", "sketch_pattern", "set_construction", "add_sketch_dimension",
-                "add_sketch_relation"]),
+                "add_sketch_relation", "sketch_text"]),
     ("Part features", ["extrude", "extrude_sketch", "cut_extrude", "revolve", "loft", "sweep", "fillet_edges",
                        "chamfer_edges", "shell", "rib", "draft", "hole_wizard", "linear_pattern",
-                       "circular_pattern", "mirror", "create_ref_plane", "create_ref_axis"]),
+                       "circular_pattern", "mirror", "create_ref_plane", "create_ref_axis",
+                       "scale_part", "cosmetic_thread"]),
+    ("Multi-body", ["list_bodies", "combine_bodies", "split_body", "delete_body"]),
+    ("Surface", ["surface_extrude", "surface_revolve", "planar_surface", "offset_surface", "loft_surface",
+                 "knit_surfaces", "thicken_surface", "cut_with_surface", "delete_face"]),
+    ("Sheet metal", ["base_flange", "edge_flange", "flatten", "export_flat_pattern"]),
     ("Selection & topology", ["list_edges", "list_faces", "select_edges", "select_faces", "select_entity",
                               "clear_selection", "get_selection", "measure"]),
     ("Parametric edit", ["list_features", "get_feature_info", "edit_feature", "list_dimensions", "set_dimension",
@@ -622,10 +774,12 @@ CATEGORIES: List[Tuple[str, List[str]]] = [
                              "capture_view"]),
     ("Assembly", ["insert_component", "add_mate", "list_components", "list_mates", "move_component",
                   "fix_component", "set_component_state", "replace_component", "component_pattern",
-                  "check_interference", "create_exploded_view"]),
+                  "check_interference", "create_exploded_view", "add_advanced_mate", "export_bom",
+                  "pack_and_go"]),
     ("Drawing", ["create_drawing", "list_drawing_views", "add_drawing_view", "add_section_view",
                  "add_detail_view", "insert_model_annotations", "insert_center_marks", "insert_bom",
-                 "auto_balloon", "add_note", "add_sheet", "activate_sheet"]),
+                 "auto_balloon", "add_note", "add_sheet", "activate_sheet", "add_revision",
+                 "insert_hole_table", "add_auxiliary_view", "add_broken_out_section"]),
     ("Advanced", ["execute_python"]),
 ]
 

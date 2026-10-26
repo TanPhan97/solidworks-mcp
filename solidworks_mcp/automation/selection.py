@@ -50,6 +50,25 @@ def _close(p, q, tol=_POINT_TOL):
     return all(abs(a - b) <= tol for a, b in zip(p, q))
 
 
+def _edge_mid(curve, params, length: float) -> List[float]:
+    """
+    Middle point of an edge from its curve and GetCurveParams2 data.
+    Lines use the chord midpoint: Curve.Evaluate2 disagrees with GetCurveParams2
+    on reversed lines (SW 2026: an edge from x=40 to x=-40 evaluated its middle at
+    x=80). Curves use Evaluate2, checked against the end points.
+    """
+    start = [float(v) for v in params[0:3]]
+    end = [float(v) for v in params[3:6]]
+    chord = [(start[i] + end[i]) / 2.0 for i in range(3)]
+    if cu.try_call(curve, "IsLine"):
+        return chord
+    t0, t1 = float(params[6]), float(params[7])
+    ev = [float(v) for v in cu.as_list(cu.try_call(curve, "Evaluate2", (t0 + t1) / 2.0, 0))[:3]]
+    if len(ev) == 3 and all(math.dist(ev, p) <= length + 1e-6 for p in (start, end)):
+        return ev
+    return chord
+
+
 class SelectionOperations:
     """
     Mixin for topology enumeration and selection.
@@ -64,8 +83,9 @@ class SelectionOperations:
     def _get_bodies(self, doc) -> List[Any]:
         if cu.doc_type(doc) != 1:
             raise ValueError("Topology listing is supported on part documents only")
-        bodies = cu.as_list(doc.GetBodies2(0, True))  # swSolidBody = 0, visible only
-        return bodies
+        # Solid bodies first (indices of solid-only parts stay stable), then surface
+        # (sheet) bodies so surface faces / edges can be listed and selected too.
+        return cu.as_list(doc.GetBodies2(0, True)) + cu.as_list(doc.GetBodies2(1, True))
 
     def _edge_records(self, doc) -> List[Dict]:
         records = []
@@ -81,11 +101,8 @@ class SelectionOperations:
                     rec["start"] = [float(v) for v in start]
                     rec["end"] = [float(v) for v in end]
 
-                    mid = cu.try_call(curve, "Evaluate2", (t0 + t1) / 2.0, 0)
-                    mid = cu.as_list(mid)[:3] if mid else [
-                        (start[i] + end[i]) / 2.0 for i in range(3)]
-                    rec["mid"] = [float(v) for v in mid]
                     rec["length"] = float(cu.try_call(curve, "GetLength3", t0, t1, default=0.0) or 0.0)
+                    rec["mid"] = _edge_mid(curve, params, rec["length"])
 
                     if cu.try_call(curve, "IsLine"):
                         lp = cu.as_list(cu.call(curve, "LineParams"))
@@ -147,10 +164,8 @@ class SelectionOperations:
                         try:
                             p = cu.as_list(cu.call(e, "GetCurveParams2"))
                             c = cu.call(e, "GetCurve")
-                            t0, t1 = float(p[6]), float(p[7])
-                            m = cu.as_list(cu.try_call(c, "Evaluate2", (t0 + t1) / 2.0, 0))[:3]
-                            if m:
-                                rec["_edge_mids"].append([float(v) for v in m])
+                            ln = float(cu.try_call(c, "GetLength3", float(p[6]), float(p[7]), default=0.0) or 0.0)
+                            rec["_edge_mids"].append(_edge_mid(c, p, ln))
                         except Exception:  # noqa: BLE001
                             pass
                 except Exception as e:  # noqa: BLE001

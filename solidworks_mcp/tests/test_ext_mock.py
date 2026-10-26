@@ -285,7 +285,7 @@ class FakeDoc:
         return "Part1"
 
     def GetBodies2(self, t, visible):
-        return (self._body,)
+        return (self._body,) if t == 0 else ()      # swSolidBody 0; no sheet (surface) bodies
 
     def ClearSelection2(self, b):
         self.sel_log.clear()
@@ -1112,3 +1112,17 @@ def test_close_document_never_drops_changes_silently():
     a._sw_app = App(d2)
     assert not a.close_document(save=True)["success"] and not closed
     assert a.close_document(discard_changes=True)["success"] and closed == ["P1"]
+
+
+def test_parse_metric_thread_sizes():
+    from solidworks_mcp.automation.part_mold import parse_metric
+    assert parse_metric("M6x1.0") == (6.0, 1.0)
+    assert parse_metric("m8") == (8.0, 1.25)          # ISO coarse pitch
+    assert parse_metric("M10 x 1.25") == (10.0, 1.25)
+    assert parse_metric("1/4-20") is None
+
+
+def test_version_consistent():
+    import solidworks_mcp
+    from solidworks_mcp import server
+    assert solidworks_mcp.__version__ == server.__version__

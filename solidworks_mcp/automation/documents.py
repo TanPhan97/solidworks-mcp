@@ -73,7 +73,7 @@ class DocumentOperations:
             # Set view
             try:
                 doc.ShowNamedView2("*Isometric", 7)
-                doc.ViewZoomtofit2()
+                cu.call(doc, "ViewZoomtofit2")
             except:
                 pass
             
@@ -106,7 +106,7 @@ class DocumentOperations:
             
             try:
                 doc.ShowNamedView2("*Isometric", 7)
-                doc.ViewZoomtofit2()
+                cu.call(doc, "ViewZoomtofit2")
             except:
                 pass
             
@@ -285,7 +285,7 @@ class DocumentOperations:
                 3: "Drawing"
             }
             
-            doc_type = doc.GetType()
+            doc_type = cu.doc_type(doc)
             title = self._get_doc_title(doc)
             path = self._get_doc_path(doc)
             
@@ -317,14 +317,12 @@ class DocumentOperations:
                     return r
             
             docs = []
-            doc = self._sw_app.GetFirstDocument()
+            doc = cu.call(self._sw_app, "GetFirstDocument")
             
             while doc:
                 try:
-                    title = doc.GetTitle
-                    if callable(title):
-                        title = title()
-                    doc_type = doc.GetType()
+                    title = str(cu.call(doc, "GetTitle"))
+                    doc_type = cu.doc_type(doc)
                     
                     type_names = {1: "Part", 2: "Assembly", 3: "Drawing"}
                     
@@ -335,7 +333,7 @@ class DocumentOperations:
                 except:
                     pass
                 
-                doc = doc.GetNext()
+                doc = cu.try_call(doc, "GetNext")
             
             return self._result(True, f"{len(docs)} document(s) open",
                               SwErrors.swSuccess, {"documents": docs})
