@@ -22,7 +22,7 @@ from typing import Optional, Dict
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwEndConditions
+from ..constants import SwErrors
 
 logger = logging.getLogger(__name__)
 
@@ -544,72 +544,3 @@ class FeatureOperations:
         except Exception as e:
             logger.error(f"Chamfer error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFeatureError)
-    
-    # ========================================================================
-    # List Features (FIXED: properties not methods)
-    # ========================================================================
-    
-    def list_features(self) -> Dict:
-        """
-        List all features in the active document
-        FIXED v4.0: Uses properties (FirstFeature, GetNextFeature, GetTypeName2)
-        instead of method calls for SW 2025 compatibility.
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            features = []
-            
-            # FIXED: Use property access, not method calls
-            feat = doc.FirstFeature
-            
-            while feat is not None:
-                try:
-                    name = feat.Name
-                    # FIXED: GetTypeName2 is a property in SW 2025
-                    feat_type = feat.GetTypeName2
-                    
-                    features.append({
-                        "name": name,
-                        "type": feat_type,
-                    })
-                except:
-                    pass
-                
-                # FIXED: GetNextFeature is a property in SW 2025
-                try:
-                    feat = feat.GetNextFeature
-                except:
-                    break
-            
-            return self._result(True, f"{len(features)} features found",
-                              SwErrors.swSuccess,
-                              {"features": features, "count": len(features)})
-            
-        except Exception as e:
-            logger.error(f"List features error: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
-    
-    # ========================================================================
-    # Edge Selection Helper
-    # ========================================================================
-    
-    def select_edge(self, edge_index: int = 1) -> Dict:
-        """
-        Select an edge by index
-        Note: Use execute_python for precise edge selection
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            doc.ClearSelection2(True)
-            
-            return self._result(True, "Use execute_python for edge selection",
-                              SwErrors.swSuccess)
-            
-        except Exception as e:
-            return self._result(False, f"Error: {e}", SwErrors.swSelectionError)

@@ -18,15 +18,19 @@ from .sweep_loft import SweepLoftOperations
 from .batch_import import BatchImportOperations
 from .edit_ops import EditOperations
 from .detail_features import DetailFeatureOperations
+from .core_ops import CoreOperations
+from .part_plus import PartPlusOperations
+from .assembly_plus import AssemblyPlusOperations
 
 
-class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
+class SolidWorksAutomation(CoreOperations, _BaseAutomation, DocumentOperations,
                            SketchOperations, FeatureOperations,
                            SelectionOperations, SketchExtOperations,
                            AdvancedFeatureOperations, ModelOperations,
                            AssemblyOperations, DrawingOperations,
                            SweepLoftOperations, BatchImportOperations,
-                           EditOperations, DetailFeatureOperations):
+                           EditOperations, DetailFeatureOperations,
+                           PartPlusOperations, AssemblyPlusOperations):
     """
     Complete SolidWorks automation class
     
@@ -68,4 +72,7 @@ __all__ = [
     "BatchImportOperations",
     "EditOperations",
     "DetailFeatureOperations",
+    "CoreOperations",
+    "PartPlusOperations",
+    "AssemblyPlusOperations",
 ]

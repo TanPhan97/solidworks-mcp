@@ -1,10 +1,11 @@
 """
-Extended MCP tool registry
---------------------------
-Declarative table: tool name -> (description, JSON schema properties,
-required, automation method). Arguments are forwarded to the method by name,
-filtered to the schema's properties, so schema keys must match method
-parameter names.
+MCP tool registry — the single source of truth for every tool
+-------------------------------------------------------------
+TOOL_TABLE: tool name -> (description, JSON-schema properties, required,
+automation method name). Arguments are forwarded to the method by name,
+filtered to the schema's properties, so schema keys must match the method's
+parameter names (enforced by the test-suite). CATEGORIES groups the tools
+for the README / user manual.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -79,6 +80,69 @@ def _p(**props) -> Dict[str, Any]:
 
 # name: (description, properties, required, method)
 TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
+
+    # ------------------------------------------------------------ connection / documents
+    "connect_solidworks": ("Connect to SolidWorks (launches it if not running).", {}, [], "connect"),
+    "get_solidworks_info": ("Installed SolidWorks version/path and the running version.", {}, [],
+                            "get_solidworks_info"),
+    "create_new_part": ("New part from the default (or config.json) part template.", {}, [], "create_new_part"),
+    "create_new_assembly": ("New assembly from the default assembly template.", {}, [], "create_new_assembly"),
+    "open_document": ("Open a .sldprt / .sldasm / .slddrw file.", _p(filepath={"type": "string"}),
+                      ["filepath"], "open_document"),
+    "save_document": ("Save the active document; filepath = Save As (.sldprt/.sldasm/.slddrw).",
+                      _p(filepath={"type": "string"}), [], "save_document"),
+    "close_document": ("Close the active document.", _p(save={"type": "boolean", "default": False}), [],
+                       "close_document"),
+    "get_document_info": ("Title, path, type and configuration of the active document.", {}, [],
+                          "get_document_info"),
+    "list_open_documents": ("List open documents.", {}, [], "list_open_documents"),
+    "set_units": ("Default length unit for all tools.",
+                  _p(unit={"type": "string", "enum": ["mm", "cm", "m", "inch", "ft"]}), ["unit"], "set_units"),
+    "execute_python": (
+        "Run Python against the SolidWorks API (sw, doc, automation in scope; print() and `result` are "
+        "returned). For anything the tools do not cover. Full machine access: trusted use only.",
+        _p(code={"type": "string"}), ["code"], "execute_python"),
+
+    # ------------------------------------------------------------ sketch basics
+    "create_sketch": ("Start a sketch on Front / Top / Right or any reference plane by name (e.g. 'P25').",
+                      _p(plane={"type": "string", "default": "Front"}), [], "create_sketch"),
+    "create_sketch_on_face": ("Start a sketch on the body face at model point x, y, z.",
+                              _p(x={"type": "number", "default": 0}, y={"type": "number", "default": 0},
+                                 z={"type": "number", "default": 0}, unit=UNIT), [], "create_sketch_on_face"),
+    "close_sketch": ("Exit the active sketch (coincident endpoints are merged first).", {}, [], "close_sketch"),
+    "get_sketch_status": ("Is a sketch open; sketch names in the tree.", {}, [], "get_sketch_status"),
+    "draw_line": ("Line in the active sketch (sketch coordinates).",
+                  _p(x1={"type": "number"}, y1={"type": "number"}, x2={"type": "number"}, y2={"type": "number"},
+                     unit=UNIT), ["x1", "y1", "x2", "y2"], "draw_line"),
+    "draw_circle": ("Circle by centre and radius.", _p(x={"type": "number", "default": 0},
+                                                       y={"type": "number", "default": 0},
+                                                       radius={"type": "number"}, unit=UNIT),
+                    ["radius"], "draw_circle"),
+    "draw_rectangle": ("Corner rectangle from (x1, y1) to (x2, y2).",
+                       _p(x1={"type": "number"}, y1={"type": "number"}, x2={"type": "number"},
+                          y2={"type": "number"}, unit=UNIT), ["x1", "y1", "x2", "y2"], "draw_rectangle"),
+    "draw_arc": ("Arc by centre, radius, start and end angle (deg, counter-clockwise).",
+                 _p(cx={"type": "number"}, cy={"type": "number"}, radius={"type": "number"},
+                    start_angle={"type": "number"}, end_angle={"type": "number"}, unit=UNIT),
+                 ["cx", "cy", "radius", "start_angle", "end_angle"], "draw_arc_center"),
+    "draw_polygon": ("Regular polygon (circumscribed radius).",
+                     _p(cx={"type": "number", "default": 0}, cy={"type": "number", "default": 0},
+                        radius={"type": "number"}, sides={"type": "integer", "default": 6}, unit=UNIT),
+                     ["radius"], "draw_polygon"),
+
+    # ------------------------------------------------------------ basic features
+    "extrude_sketch": ("Boss-extrude the last sketch (blind or mid-plane). See `extrude` for all options.",
+                       _p(depth={"type": "number", "default": 10},
+                          both_directions={"type": "boolean", "default": False}, unit=UNIT), [], "extrude_sketch"),
+    "cut_extrude": ("Cut-extrude the last sketch (blind / through all, one or both directions).",
+                    _p(depth={"type": "number", "default": 10}, through_all={"type": "boolean", "default": False},
+                       both_directions={"type": "boolean", "default": False}, unit=UNIT), [], "cut_extrude"),
+    "fillet_edges": ("Constant-radius fillet on the selected edges (select_edges first).",
+                     _p(radius={"type": "number"}, unit=UNIT), ["radius"], "fillet_edges"),
+    "chamfer_edges": ("Distance-angle chamfer on the selected edges (select_edges first).",
+                      _p(distance={"type": "number"}, angle={"type": "number", "default": 45}, unit=UNIT),
+                      ["distance"], "chamfer_edges"),
+    "list_features": ("Feature tree: name, type, suppressed.", {}, [], "list_features"),
 
     # ------------------------------------------------------------ selection
     "list_edges": (
@@ -280,6 +344,7 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
            template={"type": "string", "description": ".drwdot path (default: SolidWorks default template)"},
            include_iso={"type": "boolean", "default": True},
            model_dimensions={"type": "boolean", "default": False},
+           center_marks={"type": "boolean", "default": True},
            save_path={"type": "string", "description": "Save as .slddrw"}),
         [], "create_drawing"),
     "list_drawing_views": (
@@ -416,7 +481,150 @@ TOOL_TABLE: Dict[str, Tuple[str, Dict, List[str], str]] = {
            depth={"type": "number"}, through_all={"type": "boolean", "default": False},
            thread_depth={"type": "number"}, standard={"type": "string", "default": "ISO"}, unit=UNIT),
         ["size", "points"], "hole_wizard"),
+
+    # ------------------------------------------------------------ part design (v4.3)
+    "extrude": (
+        "Extrude the last sketch with full options: boss or cut, end condition (blind, through_all, "
+        "through_all_both, mid_plane, up_to_next, through_next), second direction (depth2), draft, "
+        "thin wall, reverse, flip side to cut.",
+        _p(depth={"type": "number", "default": 10},
+           end_condition={"type": "string", "enum": ["blind", "through_all", "through_all_both", "mid_plane",
+                                                     "up_to_next", "through_next"], "default": "blind"},
+           depth2={"type": "number"}, end_condition2={"type": "string", "default": "blind"},
+           reverse={"type": "boolean", "default": False}, draft_angle={"type": "number", "default": 0},
+           draft_outward={"type": "boolean", "default": False}, thin_thickness={"type": "number"},
+           cut={"type": "boolean", "default": False}, flip_side={"type": "boolean", "default": False},
+           merge={"type": "boolean", "default": True}, unit=UNIT), [], "extrude"),
+    "draw_spline": ("Spline through [[x, y], ...] in the active sketch.",
+                    _p(points={"type": "array", "items": {"type": "array", "items": {"type": "number"}}}, unit=UNIT),
+                    ["points"], "draw_spline"),
+    "draw_ellipse": ("Ellipse by centre, major/minor radius and rotation (deg).",
+                     _p(cx={"type": "number"}, cy={"type": "number"}, major_radius={"type": "number"},
+                        minor_radius={"type": "number"}, angle={"type": "number", "default": 0}, unit=UNIT),
+                     ["cx", "cy", "major_radius", "minor_radius"], "draw_ellipse"),
+    "convert_entities": ("Project a face's loops (face_index) or edges (edge_indices) into the active sketch.",
+                         _p(face_index={"type": "integer"}, edge_indices=INT_LIST,
+                            inner_loops={"type": "boolean", "default": True}), [], "convert_entities"),
+    "offset_entities": ("Offset model edges (face_index / edge_indices) or sketch entities into the active sketch.",
+                        _p(distance={"type": "number"}, face_index={"type": "integer"}, edge_indices=INT_LIST,
+                           entities={"type": "array", "items": SKETCH_ENTITY}, both_directions={"type": "boolean", "default": False},
+                           reverse={"type": "boolean", "default": False}, unit=UNIT), ["distance"], "offset_entities"),
+    "sketch_mirror": ("Mirror sketch entities about a sketch line / centerline.",
+                      _p(entities={"type": "array", "items": SKETCH_ENTITY}, mirror_line=SKETCH_ENTITY, unit=UNIT),
+                      ["entities", "mirror_line"], "sketch_mirror"),
+    "sketch_pattern": ("Sketch step-and-repeat: linear (count_x × count_y, spacing, angle) or circular "
+                       "(count over total_angle about center [x, y]).",
+                       _p(entities={"type": "array", "items": SKETCH_ENTITY}, kind={"type": "string", "enum": ["linear", "circular"],
+                                                          "default": "linear"},
+                          count_x={"type": "integer", "default": 2}, spacing_x={"type": "number", "default": 10},
+                          count_y={"type": "integer", "default": 1}, spacing_y={"type": "number", "default": 10},
+                          angle_x={"type": "number", "default": 0}, count={"type": "integer", "default": 4},
+                          center={"type": "array", "items": {"type": "number"}},
+                          total_angle={"type": "number", "default": 360}, unit=UNIT),
+                       ["entities"], "sketch_pattern"),
+    "set_construction": ("Toggle sketch entities to construction geometry (or back).",
+                         _p(entities={"type": "array", "items": SKETCH_ENTITY}, construction={"type": "boolean", "default": True}, unit=UNIT),
+                         ["entities"], "set_construction"),
+    "create_ref_axis": ("Reference axis from a cylindrical face, a linear edge, or two planes (reference specs).",
+                        _p(refs={"type": "array", "items": REF_SPEC}, name={"type": "string"}, unit=UNIT),
+                        ["refs"], "create_ref_axis"),
+    "list_configurations": ("Configurations of the active model and the active one.", {}, [], "list_configurations"),
+    "add_configuration": ("Add a configuration (activated by default).",
+                          _p(name={"type": "string"}, description={"type": "string", "default": ""},
+                             activate={"type": "boolean", "default": True}), ["name"], "add_configuration"),
+    "activate_configuration": ("Switch the active configuration.", _p(name={"type": "string"}), ["name"],
+                               "activate_configuration"),
+    "list_equations": ("Equations and global variables with current values.", {}, [], "list_equations"),
+    "set_equation": ("Add or replace an equation / global variable, e.g. '\"Wall\" = 2' or "
+                     "'\"D1@Boss-Extrude1\" = \"Wall\" * 3'. Rebuilds and reports errors.",
+                     _p(equation={"type": "string"}), ["equation"], "set_equation"),
+    "delete_feature": ("Delete a feature (absorbed sketches too; children only if asked).",
+                       _p(name={"type": "string"}, delete_children={"type": "boolean", "default": False}),
+                       ["name"], "delete_feature"),
+    "rename_feature": ("Rename a feature.", _p(name={"type": "string"}, new_name={"type": "string"}),
+                       ["name", "new_name"], "rename_feature"),
+    "measure": ("Measure 1–2 entities (reference specs): distance, normal/centre distance, angle, length, "
+                "radius, area.", _p(entities={"type": "array", "items": REF_SPEC}, unit=UNIT), ["entities"], "measure"),
+
+    # ------------------------------------------------------------ assembly (v4.3)
+    "move_component": ("Translate a non-fixed component by dx, dy, dz and optionally rotate it about assembly "
+                       "x/y/z (deg). Mates still win on rebuild.",
+                       _p(name={"type": "string"}, dx={"type": "number", "default": 0}, dy={"type": "number", "default": 0},
+                          dz={"type": "number", "default": 0}, rotate_axis={"type": "string", "enum": AXIS_ENUM},
+                          rotate_angle={"type": "number", "default": 0}, unit=UNIT), ["name"], "move_component"),
+    "fix_component": ("Fix (or float) components.", _p(names=STR_LIST, fixed={"type": "boolean", "default": True}),
+                      ["names"], "fix_component"),
+    "set_component_state": ("Suppress / resolve and/or hide / show components.",
+                            _p(names=STR_LIST, suppressed={"type": "boolean"}, visible={"type": "boolean"}),
+                            ["names"], "set_component_state"),
+    "replace_component": ("Replace a component with another file (mates re-attached when possible).",
+                          _p(name={"type": "string"}, filepath={"type": "string"},
+                             all_instances={"type": "boolean", "default": False},
+                             reattach_mates={"type": "boolean", "default": True}),
+                          ["name", "filepath"], "replace_component"),
+    "component_pattern": ("Linear (direction ref + spacing) or circular (axis ref + total angle) pattern of "
+                          "components.",
+                          _p(components=STR_LIST, kind={"type": "string", "enum": ["linear", "circular"],
+                                                        "default": "linear"},
+                             direction=REF_SPEC, count={"type": "integer", "default": 3},
+                             spacing={"type": "number", "default": 20}, axis=REF_SPEC,
+                             total_angle={"type": "number", "default": 360}, unit=UNIT),
+                          ["components"], "component_pattern"),
+    "list_mates": ("Mates: type, components, suppressed and error code (over-defined / unsolved).", {}, [],
+                   "list_mates"),
+    "check_interference": ("Interference detection: component pairs and interference volume.",
+                           _p(treat_coincidence={"type": "boolean", "default": False}, unit=UNIT), [],
+                           "check_interference"),
+    "create_exploded_view": ("Exploded view: steps [{components, direction x|y|z, distance, reverse}].",
+                             _p(steps={"type": "array", "items": {"type": "object"}}, unit=UNIT), ["steps"],
+                             "create_exploded_view"),
+
+    # ------------------------------------------------------------ drawing (v4.3)
+    "add_sheet": ("New drawing sheet with the current sheet's size and format (title block).",
+                  _p(name={"type": "string"}, scale={"type": "string"},
+                     copy_format={"type": "boolean", "default": True}), [], "add_sheet"),
+    "activate_sheet": ("Switch the active drawing sheet.", _p(name={"type": "string"}), ["name"], "activate_sheet"),
+    "add_note": ("Text note at sheet position x, y (mm).", _p(text={"type": "string"}, x={"type": "number"},
+                                                              y={"type": "number"}), ["text", "x", "y"], "add_note"),
+    "insert_center_marks": ("Auto center marks for holes / slots / fillets in views (default all).",
+                            _p(views={"type": "array", "items": {"type": "string"}},
+                               holes={"type": "boolean", "default": True},
+                               fillets={"type": "boolean", "default": False},
+                               slots={"type": "boolean", "default": True}), [], "insert_center_marks"),
 }
+
+
+# Groups for documentation (README / user manual are generated from this).
+CATEGORIES: List[Tuple[str, List[str]]] = [
+    ("Connection & documents", ["connect_solidworks", "get_solidworks_info", "create_new_part",
+                                "create_new_assembly", "open_document", "import_file", "save_document",
+                                "close_document", "activate_document", "get_document_info",
+                                "list_open_documents", "set_units"]),
+    ("Sketch", ["create_sketch", "create_sketch_on_face", "close_sketch", "get_sketch_status", "draw_line",
+                "draw_circle", "draw_rectangle", "draw_arc", "draw_polygon", "draw_centerline", "draw_slot",
+                "draw_spline", "draw_ellipse", "sketch_fillet", "convert_entities", "offset_entities",
+                "sketch_mirror", "sketch_pattern", "set_construction", "add_sketch_dimension",
+                "add_sketch_relation"]),
+    ("Part features", ["extrude", "extrude_sketch", "cut_extrude", "revolve", "loft", "sweep", "fillet_edges",
+                       "chamfer_edges", "shell", "rib", "draft", "hole_wizard", "linear_pattern",
+                       "circular_pattern", "mirror", "create_ref_plane", "create_ref_axis"]),
+    ("Selection & topology", ["list_edges", "list_faces", "select_edges", "select_faces", "select_entity",
+                              "clear_selection", "get_selection", "measure"]),
+    ("Parametric edit", ["list_features", "get_feature_info", "edit_feature", "list_dimensions", "set_dimension",
+                         "list_equations", "set_equation", "list_configurations", "add_configuration",
+                         "activate_configuration", "suppress_feature", "delete_feature", "rename_feature",
+                         "rebuild", "undo"]),
+    ("Properties & output", ["get_mass_properties", "set_material", "set_custom_property",
+                             "get_custom_properties", "export_document", "batch_export", "set_view",
+                             "capture_view"]),
+    ("Assembly", ["insert_component", "add_mate", "list_components", "list_mates", "move_component",
+                  "fix_component", "set_component_state", "replace_component", "component_pattern",
+                  "check_interference", "create_exploded_view"]),
+    ("Drawing", ["create_drawing", "list_drawing_views", "add_drawing_view", "add_section_view",
+                 "add_detail_view", "insert_model_annotations", "insert_center_marks", "insert_bom",
+                 "auto_balloon", "add_note", "add_sheet", "activate_sheet"]),
+    ("Advanced", ["execute_python"]),
+]
 
 
 def ext_tools() -> List[Tool]:

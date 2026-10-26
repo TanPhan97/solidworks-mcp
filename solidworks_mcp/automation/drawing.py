@@ -291,7 +291,7 @@ class DrawingOperations:
     def create_drawing(self, model_path: str = None, views: List[str] = None,
                        scale: str = "auto", template: str = None,
                        include_iso: bool = True, model_dimensions: bool = False,
-                       save_path: str = None) -> Dict:
+                       center_marks: bool = True, save_path: str = None) -> Dict:
         """
         New drawing of a part/assembly. Default: projected Front/Top/Right
         (1st or 3rd angle per the sheet format) + isometric, auto-scaled.
@@ -354,6 +354,10 @@ class DrawingOperations:
             if model_dimensions:
                 cu.try_call(drw, "InsertModelAnnotations3", 0, _ANNOT["dimensions_marked"],
                             True, False, False, True)
+            if center_marks:
+                for v in self._views(drw):
+                    cu.try_call(v, "AutoInsertCenterMarks2", 1 | 4, 0, True, True, True, 0.0025, 0.0015,
+                                True, True, 0.0)
             cu.try_call(drw, "ViewZoomtofit2")
             cu.rebuild(drw)
 
@@ -635,3 +639,122 @@ class DrawingOperations:
         except Exception as e:
             logger.error(f"auto_balloon error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
+
+    # ------------------------------------------------------------------
+    # sheets, notes, center marks
+    # ------------------------------------------------------------------
+
+    def add_sheet(self, name: str = None, scale: str = None, copy_format: bool = True) -> Dict:
+        """
+        New sheet using the current sheet's paper size and sheet format (title block),
+        then make it active. IDrawingDoc.NewSheet4 (16 args).
+        A sheet format path that no longer exists makes SolidWorks open a modal
+        "Sheet Format/Size" dialog (which blocks COM), so the format embedded in the
+        current sheet is exported with ISheet.SaveFormat and used instead.
+        """
+        try:
+            drw, err = self._require_drawing()
+            if err:
+                return err
+            info = self._sheet_info(drw)
+            p = info["props"]
+            sc = _parse_scale(scale) or info["scale"]
+            fmt = _sheet_format_file(info["sheet"], info["name"]) if copy_format else ""
+            names = [str(n) for n in cu.as_list(cu.try_call(drw, "GetSheetNames"))]
+            name = name or f"Sheet{len(names) + 1}"
+            if name in names:
+                return self._result(False, f"Sheet '{name}' exists", SwErrors.swInvalidInput)
+            ok = drw.NewSheet4(name, int(p[0]), 12 if fmt else 13, float(sc[0]), float(sc[1]), bool(p[4]),
+                               fmt, float(p[5]), float(p[6]), "Default", 0.0, 0.0, 0.0, 0.0, 0, 0)
+            if not ok:
+                return self._result(False, "NewSheet4 failed", SwErrors.swFeatureError)
+            cu.try_call(drw, "ActivateSheet", name)
+            return self._result(True, f"Sheet {name} added ({sc[0]:g}:{sc[1]:g})", SwErrors.swSuccess,
+                                {"sheets": [str(n) for n in cu.as_list(cu.try_call(drw, "GetSheetNames"))],
+                                 "format": fmt or None})
+        except Exception as e:
+            logger.error(f"add_sheet error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
+
+    def activate_sheet(self, name: str) -> Dict:
+        try:
+            drw, err = self._require_drawing()
+            if err:
+                return err
+            ok = drw.ActivateSheet(name)
+            return self._result(bool(ok), f"Active sheet: {self._sheet_info(drw)['name']}",
+                                SwErrors.swSuccess if ok else SwErrors.swInvalidInput)
+        except Exception as e:
+            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
+
+    def add_note(self, text: str, x: float, y: float) -> Dict:
+        """Free text note at sheet position (x, y) mm. Use \\n for new lines."""
+        try:
+            drw, err = self._require_drawing()
+            if err:
+                return err
+            drw.ClearSelection2(True)
+            note = drw.InsertNote(text)
+            if note is None:
+                return self._result(False, "InsertNote failed", SwErrors.swFeatureError)
+            ann = cu.call(note, "GetAnnotation")
+            ann.SetPosition2(x * MM, y * MM, 0.0)
+            drw.ClearSelection2(True)
+            cu.try_call(drw, "GraphicsRedraw2")
+            return self._result(True, f"Note at ({x}, {y}) mm", SwErrors.swSuccess)
+        except Exception as e:
+            logger.error(f"add_note error: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
+
+    def insert_center_marks(self, views: List[str] = None, holes: bool = True, fillets: bool = False,
+                            slots: bool = True) -> Dict:
+        """IView.AutoInsertCenterMarks2 on the listed views (default: all)."""
+        try:
+            drw, err = self._require_drawing()
+            if err:
+                return err
+            kinds = (1 if holes else 0) | (2 if fillets else 0) | (4 if slots else 0)
+            targets = [v for v in self._views(drw)
+                       if not views or str(cu.try_call(v, "GetName2", default="")) in views]
+            added, skipped = {}, []
+            for v in targets:
+                name = str(cu.try_call(v, "GetName2", default=""))
+                before = _center_mark_count(v)
+                if before:                       # already marked: avoid duplicates
+                    skipped.append(name)
+                    continue
+                cu.try_call(v, "AutoInsertCenterMarks2", kinds, 0, True, True, True, 0.0025, 0.0015,
+                            True, True, 0.0)
+                n = _center_mark_count(v) - before
+                if n > 0:
+                    added[name] = n
+            cu.rebuild(drw)
+            total = sum(added.values())
+            msg = f"{total} center mark(s) in {len(added)} view(s)" + (
+                f"; {len(skipped)} view(s) already had marks" if skipped else "")
+            return self._result(bool(added) or bool(skipped), msg,
+                                SwErrors.swSuccess if added or skipped else SwErrors.swFeatureError,
+                                {"added": added, "skipped": skipped})
+        except Exception as e:
+            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
+
+
+def _center_mark_count(view) -> int:
+    n, cm = 0, cu.try_call(view, "GetFirstCenterMark2")
+    while cm is not None and n < 10000:
+        n += 1
+        cm = cu.try_call(cm, "GetNext")
+    return n
+
+
+def _sheet_format_file(sheet, sheet_name: str) -> str:
+    """Existing .slddrt for `sheet`; exports the embedded format when the file is missing."""
+    import tempfile
+    path = str(cu.try_call(sheet, "GetTemplateName", default="") or "")
+    if path and os.path.isfile(path):
+        return path
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in sheet_name)
+    tmp = os.path.join(tempfile.gettempdir(), f"swmcp_fmt_{safe}.slddrt")
+    if cu.try_call(sheet, "SaveFormat", tmp, default=False) and os.path.isfile(tmp):
+        return tmp
+    return ""

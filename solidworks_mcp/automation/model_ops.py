@@ -198,12 +198,16 @@ class ModelOperations:
             doc, err = self.get_active_doc()
             if err:
                 return err
+            # Exit an open sketch first so the rebuild actually runs (and say so).
+            closed = cu.close_active_sketch(doc)
             ok = cu.rebuild(doc, force)
             errors = self._rebuild_errors(doc)
-            return self._result(ok and not errors,
-                                "Rebuilt" + (f" with errors: {errors}" if errors else ""),
-                                SwErrors.swSuccess if ok and not errors else SwErrors.swFeatureError,
-                                {"errors": errors})
+            # EditRebuild3 can return False with nothing to rebuild: judge by feature errors.
+            return self._result(not errors,
+                                ("Sketch closed; " if closed else "") + "Rebuilt"
+                                + (f" with errors: {errors}" if errors else ""),
+                                SwErrors.swSuccess if not errors else SwErrors.swFeatureError,
+                                {"errors": errors, "rebuild_returned": ok, "sketch_closed": closed})
         except Exception as e:
             return self._result(False, f"Error: {e}", SwErrors.swFeatureError)
 
@@ -377,7 +381,8 @@ class ModelOperations:
                                     SwErrors.swInvalidFileType)
             ok, errs, warns = cu.save_copy(self.app, doc, path)
             if not ok:
-                return self._result(False, f"Export failed (swFileSaveError {errs})",
+                why = errs if isinstance(errs, str) else f"swFileSaveError {errs}"
+                return self._result(False, f"Export failed ({why})",
                                     SwErrors.swExportError, {"path": path})
             size_kb = round(os.path.getsize(path) / 1024, 1)
             return self._result(True, f"Exported {ext[1:].upper()} → {path} ({size_kb} KB)",

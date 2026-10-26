@@ -36,6 +36,18 @@ def call(obj, name: str, *args):
     return attr
 
 
+def invoke_method(obj, name: str, *args):
+    """
+    Call a COM *method* through IDispatch with DISPATCH_METHOD. Needed for objects
+    that expose no type info (IMeasure, IMathUtility on SW 2026): pywin32 then reads
+    `obj.Name` as a property get, so `obj.Name(args)` fails with 'Member not found'
+    or "'bool' object is not callable".
+    """
+    ole = obj._oleobj_
+    dispid = ole.GetIDsOfNames(name)
+    return ole.Invoke(dispid, 0, pythoncom.DISPATCH_METHOD, True, *args)
+
+
 def try_call(obj, name: str, *args, default=None):
     """call() that returns `default` instead of raising."""
     try:
@@ -282,25 +294,43 @@ def find_open_doc(sw_app, path: str):
 _MESH_EXTS = {".stl", ".3mf", ".amf", ".wrl"}
 # swUserPreferenceToggle_e (SW 2026 swconst.tlb)
 _STL_ONE_FILE, _STL_INFO_DIALOG, _STL_PREVIEW = 72, 70, 191
+_PDF_VIEW_ON_SAVE = 617          # swPDFViewOnSave: opens the PDF in a viewer, which locks it
 
 
 def save_copy(sw_app, doc, path: str):
     """
     Save a copy of `doc` to `path` (format from extension), document keeps its
     own path. For mesh formats the STL info / preview dialogs (which block COM)
-    are switched off and assembly components are merged into one file; user
-    preferences are restored afterwards. Returns (ok, errors, warnings).
+    are switched off and assembly components are merged into one file; for PDF
+    "view on save" is switched off (the viewer locks the file); the selection is
+    cleared (otherwise only selected entities are exported). User preferences are
+    restored afterwards. Returns (ok, errors, warnings); errors is a str when the
+    target file is locked.
     """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    if os.path.exists(path):
+        try:
+            open(path, "r+b").close()
+        except OSError:
+            return False, "target file is locked (open in another program)", None
     saved_prefs = {}
     prev_active = None
-    mesh = os.path.splitext(path)[1].lower() in _MESH_EXTS and sw_app is not None
+    ext = os.path.splitext(path)[1].lower()
+    mesh = ext in _MESH_EXTS and sw_app is not None
+    toggles = []
     if mesh:
-        for key, val in ((_STL_INFO_DIALOG, False), (_STL_PREVIEW, False), (_STL_ONE_FILE, True)):
-            old = try_call(sw_app, "GetUserPreferenceToggle", key)
-            if old is not None:
-                saved_prefs[key] = bool(old)
-                try_call(sw_app, "SetUserPreferenceToggle", key, val)
+        toggles = [(_STL_INFO_DIALOG, False), (_STL_PREVIEW, False), (_STL_ONE_FILE, True)]
+    elif ext == ".pdf" and sw_app is not None:
+        toggles = [(_PDF_VIEW_ON_SAVE, False)]
+    for key, val in toggles:
+        old = try_call(sw_app, "GetUserPreferenceToggle", key)
+        if old is not None:
+            saved_prefs[key] = bool(old)
+            try_call(sw_app, "SetUserPreferenceToggle", key, val)
+    # A leftover selection (e.g. a face from the last feature) makes STEP / STL
+    # export only the selected entities: SW 2026 wrote a 4.5 KB STEP of a plate.
+    try_call(doc, "ClearSelection2", True)
+    if mesh:
         # The mesh translator exports the ACTIVE document, not `doc` (SW 2026: an STL
         # "of a part" contained the components of the active assembly).
         active = try_call(sw_app, "ActiveDoc")
@@ -328,7 +358,14 @@ def save_copy(sw_app, doc, path: str):
 
 
 def rebuild(doc, force: bool = False) -> bool:
+    """
+    Rebuild the model. While a sketch is being edited only redraw: EditRebuild3
+    there exits the sketch (like Ctrl+B), which breaks follow-up sketch calls.
+    """
     try:
+        if try_call(try_call(doc, "SketchManager"), "ActiveSketch") is not None:
+            try_call(doc, "GraphicsRedraw2")
+            return True
         if force:
             return bool(doc.ForceRebuild3(False))
         return bool(doc.EditRebuild3())

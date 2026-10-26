@@ -148,6 +148,22 @@ class BatchImportOperations:
             if ext not in _IMPORT_EXT:
                 return self._result(False, f"Unsupported extension {ext}", SwErrors.swInvalidFileType)
 
+            # SolidWorks cannot open two documents with the same title: importing
+            # plate.step while plate.SLDPRT is open fails with error 1. Load a renamed copy.
+            renamed = None
+            stem = os.path.splitext(os.path.basename(path))[0].lower()
+            open_stems = {os.path.splitext(str(cu.try_call(d, "GetTitle", default="")))[0].lower()
+                          for d in cu.as_list(cu.try_call(sw, "GetDocuments"))}
+            if stem in open_stems:
+                import shutil
+                import tempfile
+                base, ext2 = os.path.splitext(os.path.basename(path))
+                n = 1
+                while f"{base}_import{n}".lower() in open_stems:
+                    n += 1
+                renamed = os.path.join(tempfile.gettempdir(), f"{base}_import{n}{ext2}")
+                shutil.copy2(path, renamed)
+                path = renamed
             data = cu.try_call(sw, "GetImportFileData", path)
             errs = cu.byref_int(0)
             t0 = time.time()
@@ -161,6 +177,8 @@ class BatchImportOperations:
             info = {"title": str(cu.try_call(doc, "GetTitle", default="")),
                     "type": {1: "part", 2: "assembly", 3: "drawing"}.get(dtype, dtype),
                     "seconds": round(time.time() - t0, 1)}
+            if renamed:
+                info["renamed_copy"] = renamed
             if dtype == 1:
                 info["solid_bodies"] = len(cu.as_list(cu.try_call(doc, "GetBodies2", 0, True)))
             elif dtype == 2:

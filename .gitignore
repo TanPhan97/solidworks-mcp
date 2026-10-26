@@ -16,3 +16,7 @@ _smoke/
 .pytest_cache/
 *.bak
 *.bak_*
+
+# Smoke-test output folders
+_v4*/
+_live*/

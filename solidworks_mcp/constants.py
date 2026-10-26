@@ -106,8 +106,16 @@ class SwMateTypes(IntEnum):
     swMateTANGENT = 4
     swMateDISTANCE = 5
     swMateANGLE = 6
+    swMateSYMMETRIC = 8
+    swMateCAMFOLLOWER = 9
+    swMateGEAR = 10
+    swMateWIDTH = 11            # verified against swconst.tlb (SW 2026); was 18 (= LINEARCOUPLER)
+    swMatePATH = 15
     swMateLOCK = 16
-    swMateWIDTH = 18
+    swMateSCREW = 17
+    swMateLINEARCOUPLER = 18
+    swMateSLOT = 21
+    swMateHINGE = 22
 
 
 # ============================================================================

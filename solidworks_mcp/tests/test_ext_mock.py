@@ -352,7 +352,7 @@ def test_server_tool_names_unique():
     tools = asyncio.run(server.list_tools())
     names = [t.name for t in tools]
     assert len(names) == len(set(names)), "duplicate tool names"
-    assert len(names) == 25 + len(tools_ext.TOOL_TABLE)
+    assert len(names) == len(tools_ext.TOOL_TABLE) >= 100
 
 
 # ----------------------------------------------------------------------------
@@ -914,3 +914,156 @@ def test_batch_never_closes_preloaded_documents(sw, tmp_path):
     a._sw_app = App(doc)
     r = a.batch_export(str(tmp_path), ["step"])
     assert r["success"] and closed == []
+
+
+
+# ----------------------------------------------------------------------------
+# v4.3: single registry, categories, new part / assembly / drawing tools
+# ----------------------------------------------------------------------------
+
+def test_every_tool_in_exactly_one_category():
+    listed = [t for _, names in tools_ext.CATEGORIES for t in names]
+    assert sorted(listed) == sorted(tools_ext.TOOL_TABLE), (
+        set(tools_ext.TOOL_TABLE) ^ set(listed))
+    assert len(listed) == len(set(listed))
+
+
+def test_extrude_full_options_param_counts(sw):
+    a, doc = sw
+    assert a.extrude(5, end_condition="through_all", cut=True)["success"]
+    args = fm_call(doc, "FeatureCut4")
+    assert len(args) == 27 and args[3] == 1
+    assert a.extrude(8, depth2=3, draft_angle=2)["success"]
+    args = fm_call(doc, "FeatureExtrusion2")
+    assert len(args) == 23 and args[0] is False and abs(args[5] - 0.008) < 1e-12 and abs(args[6] - 0.003) < 1e-12
+    assert args[7] is True and abs(args[11] - math.radians(2)) < 1e-12
+    assert a.extrude(8, thin_thickness=1)["success"]
+    assert len(fm_call(doc, "FeatureExtrusionThin2")) == 30
+    assert not a.extrude(5, end_condition="weird")["success"]
+
+
+class AsmDoc(FakeDoc):
+    def __init__(self):
+        super().__init__(doc_type=2)
+
+        class Xf:
+            ArrayData = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0.01, 0.0, 0.0, 1, 0, 0, 0)
+
+        class Comp:
+            Name2, fixed = "Part1-1", False
+            Transform2 = Xf()
+            Visible = 1
+
+            def IsFixed(self):
+                return self.fixed
+
+            def SetSuppression2(self, s):
+                self.supp = s
+
+            def Select4(self, a, d, b):
+                return True
+        self.comp = Comp()
+
+    def GetTitle(self):
+        return "Asm1.SLDASM"
+
+    def GetComponents(self, top):
+        return (self.comp,)
+
+    def FixComponent(self):
+        self.comp.fixed = True
+
+    def UnfixComponent(self):
+        self.comp.fixed = False
+
+
+def _asm_automation():
+    a = SolidWorksAutomation()
+    d = AsmDoc()
+    a._sw_app, a._connected = FakeApp(d), True
+    return a, d
+
+
+def test_move_component_translates_and_rotates():
+    a, d = _asm_automation()
+    r = a.move_component("Part1-1", dx=5, dz=-2, rotate_axis="z", rotate_angle=90)
+    assert r["success"], r
+    arr = d.comp.Transform2.ArrayData.value
+    assert [round(v * 1000, 6) for v in arr[9:12]] == [15.0, 0.0, -2.0]
+    assert [round(v, 9) for v in arr[0:3]] == [0.0, 1.0, 0.0]
+    d.comp.fixed = True
+    assert not a.move_component("Part1-1", dx=1)["success"]
+    assert not a.move_component("Nope-1", dx=1)["success"]
+
+
+def test_fix_and_state():
+    a, d = _asm_automation()
+    assert a.fix_component(["Part1-1"])["success"] and d.comp.fixed
+    assert a.fix_component(["Part1-1"], fixed=False)["success"] and not d.comp.fixed
+    assert a.set_component_state(["Part1-1"], suppressed=True, visible=False)["success"]
+    assert d.comp.supp == 0 and d.comp.Visible == 0
+
+
+def test_part_tools_reject_without_sketch(sw):
+    a, _ = sw
+    for r in (a.draw_spline([[0, 0], [1, 1]]), a.convert_entities(face_index=0),
+              a.sketch_mirror([{"point": [0, 0]}], {"point": [1, 1]})):
+        assert not r["success"] and "No active sketch" in r["message"]
+
+
+def test_sheet_format_missing_file_is_exported(tmp_path, monkeypatch):
+    """A dead .slddrt path must never reach NewSheet4 (it opens a blocking dialog)."""
+    from solidworks_mcp.automation import drawing as dmod
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    good = tmp_path / "a4.slddrt"
+    good.write_bytes(b"x")
+
+    class Sheet:
+        def __init__(self, path, can_save=True):
+            self.path, self.can_save = path, can_save
+
+        def GetTemplateName(self):
+            return self.path
+
+        def SaveFormat(self, p):
+            if self.can_save:
+                open(p, "wb").write(b"fmt")
+            return self.can_save
+
+    assert dmod._sheet_format_file(Sheet(str(good)), "S1") == str(good)
+    out = dmod._sheet_format_file(Sheet(r"C:\missing\x.slddrt"), "S1-DIM")
+    assert out == str(tmp_path / "swmcp_fmt_S1-DIM.slddrt") and os.path.isfile(out)
+    assert dmod._sheet_format_file(Sheet(r"C:\missing\x.slddrt", can_save=False), "S/2") == ""
+
+
+def test_save_copy_clears_selection_and_pdf_view(tmp_path):
+    calls = []
+
+    class Ext:
+        def SaveAs(self, path, *a):
+            open(path, "wb").write(b"%PDF")
+            return True
+
+    class Doc:
+        Extension = Ext()
+
+        def ClearSelection2(self, flag):
+            calls.append("clear")
+
+        def GetTitle(self):
+            return "D1"
+
+    class App:
+        prefs = {617: True}
+
+        def GetUserPreferenceToggle(self, k):
+            return self.prefs.get(k)
+
+        def SetUserPreferenceToggle(self, k, v):
+            calls.append((k, v))
+            self.prefs[k] = v
+
+    app = App()
+    ok, errs, _ = cu.save_copy(app, Doc(), str(tmp_path / "a.pdf"))
+    assert ok and "clear" in calls and (617, False) in calls and app.prefs[617] is True
