@@ -15,6 +15,7 @@ import pythoncom
 from ..constants import SwErrors, SwDocumentTypes, SwFileTypes
 from ..utils import find_template
 from .templates import resolve_template
+from . import com_utils as cu
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class DocumentOperations:
             # Set view
             try:
                 doc.ShowNamedView2("*Isometric", 7)
-                doc.ViewZoomtofit2()
+                cu.call(doc, "ViewZoomtofit2")
             except:
                 pass
             
@@ -105,7 +106,7 @@ class DocumentOperations:
             
             try:
                 doc.ShowNamedView2("*Isometric", 7)
-                doc.ViewZoomtofit2()
+                cu.call(doc, "ViewZoomtofit2")
             except:
                 pass
             
@@ -200,125 +201,71 @@ class DocumentOperations:
     
     def save_document(self, filepath: str = None) -> Dict:
         """
-        Save the active document
-        FIXED v4.1: Use doc.SaveAs() as primary method (avoids COM type mismatch
-        with Extension.SaveAs where None parameter fails in SW 2025).
-        
-        Args:
-            filepath: Path to save (None = save in place)
-        
-        Returns:
-            Result dictionary
+        Save the active document (silently: never opens a dialog).
+        filepath given → Save As (extension added from the document type if missing);
+        no filepath → save in place.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return err
-            
+            e, w = cu.byref_int(0), cu.byref_int(0)
             if filepath:
-                # Ensure absolute path
-                filepath = os.path.abspath(filepath)
-                
-                # Ensure directory exists
-                dir_path = os.path.dirname(filepath)
-                if dir_path and not os.path.exists(dir_path):
-                    os.makedirs(dir_path)
-                
-                saved = False
-                method_used = ""
-                
-                # Method 1: doc.SaveAs (simplest, most reliable for SW 2025)
-                try:
-                    result = doc.SaveAs(filepath)
-                    if result:
-                        saved = True
-                        method_used = "SaveAs"
-                except Exception as e:
-                    logger.debug(f"doc.SaveAs failed: {e}")
-                
-                # Method 2: Extension.SaveAs with proper VARIANT null dispatch
-                if not saved:
-                    try:
-                        empty_export = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
-                        errors = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-                        warnings = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-                        
-                        result = doc.Extension.SaveAs(
-                            filepath, 0, 0, empty_export, errors, warnings
-                        )
-                        if result and errors.value == 0:
-                            saved = True
-                            method_used = "Extension.SaveAs"
-                    except Exception as e:
-                        logger.debug(f"Extension.SaveAs failed: {e}")
-                
-                # Method 3: Extension.SaveAs2
-                if not saved:
-                    try:
-                        errors = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-                        warnings = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-                        
-                        result = doc.Extension.SaveAs2(
-                            filepath, 0, 0, None, "", False, errors, warnings
-                        )
-                        if result:
-                            saved = True
-                            method_used = "Extension.SaveAs2"
-                    except Exception as e:
-                        logger.debug(f"Extension.SaveAs2 failed: {e}")
-                
-                if not saved:
-                    return self._result(False, "Save failed - all methods attempted",
-                                      SwErrors.swFileSaveError)
-                
-                return self._result(True, f"Saved: {filepath} [{method_used}]",
-                                  SwErrors.swSuccess,
-                                  {"path": filepath, "method": method_used})
+                filepath = os.path.abspath(os.path.expanduser(filepath))
+                ext = {1: ".SLDPRT", 2: ".SLDASM", 3: ".SLDDRW"}.get(cu.doc_type(doc))
+                if ext and os.path.splitext(filepath)[1].lower() not in (".sldprt", ".sldasm", ".slddrw"):
+                    filepath += ext
+                os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+                # swSaveAsCurrentVersion=0, swSaveAsOptions_Silent=1
+                r = doc.Extension.SaveAs(filepath, 0, 1, cu.nothing(), e, w)
+                ok = bool(r[0] if isinstance(r, tuple) else r) and os.path.isfile(filepath)
             else:
-                # Save in place
-                result = doc.Save3(0, 0, 0)
-                
-                if result != 0:
-                    return self._result(False, f"Save failed (code {result})",
-                                      SwErrors.swFileSaveError)
-                
-                path = self._get_doc_path(doc)
-                return self._result(True, f"Saved: {path}",
-                                  SwErrors.swSuccess, {"path": path})
-            
+                if not self._get_doc_path(doc):
+                    return self._result(False, "Document was never saved: give filepath",
+                                        SwErrors.swInvalidInput)
+                r = doc.Save3(1, e, w)
+                ok = bool(r[0] if isinstance(r, tuple) else r)
+                filepath = self._get_doc_path(doc)
+            if not ok:
+                return self._result(False, f"Save failed (swFileSaveError {getattr(e, 'value', '?')}, "
+                                           f"warnings {getattr(w, 'value', '?')})", SwErrors.swFileSaveError)
+            return self._result(True, f"Saved: {filepath}", SwErrors.swSuccess,
+                                {"path": filepath, "warnings": getattr(w, "value", 0)})
         except Exception as e:
             logger.error(f"Save error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFileSaveError)
-    
-    def close_document(self, save: bool = False) -> Dict:
+
+    def close_document(self, save: bool = False, discard_changes: bool = False) -> Dict:
         """
-        Close the active document
-        
-        Args:
-            save: Save before closing
-        
-        Returns:
-            Result dictionary
+        Close the active document. Unsaved changes are never dropped silently:
+        save=True saves first (silent); otherwise a modified document is only
+        closed with discard_changes=True.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return self._result(True, "No document to close")
-            
             title = self._get_doc_title(doc)
-            
-            if save:
-                doc.Save3(0, 0, 0)
-            
+            dirty = bool(cu.try_call(doc, "GetSaveFlag", default=False))
+            if save and dirty:
+                if not self._get_doc_path(doc):
+                    return self._result(False, f"'{title}' was never saved: save_document(filepath) first",
+                                        SwErrors.swInvalidInput)
+                e, w = cu.byref_int(0), cu.byref_int(0)
+                r = doc.Save3(1, e, w)
+                if not bool(r[0] if isinstance(r, tuple) else r):
+                    return self._result(False, f"Save failed (swFileSaveError {getattr(e, 'value', '?')}); "
+                                               "document left open", SwErrors.swFileSaveError)
+            elif dirty and not discard_changes:
+                return self._result(False, f"'{title}' has unsaved changes: use save=true, or "
+                                           "discard_changes=true to close without saving",
+                                    SwErrors.swInvalidInput, {"document": title})
             self._sw_app.CloseDoc(title)
-            
-            return self._result(True, f"Closed: {title}",
-                              SwErrors.swSuccess, {"document": title})
-            
+            return self._result(True, f"Closed: {title}", SwErrors.swSuccess, {"document": title})
         except Exception as e:
             logger.error(f"Close error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
-    
+
     def get_document_info(self) -> Dict:
         """
         Get information about the active document
@@ -338,7 +285,7 @@ class DocumentOperations:
                 3: "Drawing"
             }
             
-            doc_type = doc.GetType()
+            doc_type = cu.doc_type(doc)
             title = self._get_doc_title(doc)
             path = self._get_doc_path(doc)
             
@@ -370,14 +317,12 @@ class DocumentOperations:
                     return r
             
             docs = []
-            doc = self._sw_app.GetFirstDocument()
+            doc = cu.call(self._sw_app, "GetFirstDocument")
             
             while doc:
                 try:
-                    title = doc.GetTitle
-                    if callable(title):
-                        title = title()
-                    doc_type = doc.GetType()
+                    title = str(cu.call(doc, "GetTitle"))
+                    doc_type = cu.doc_type(doc)
                     
                     type_names = {1: "Part", 2: "Assembly", 3: "Drawing"}
                     
@@ -388,7 +333,7 @@ class DocumentOperations:
                 except:
                     pass
                 
-                doc = doc.GetNext()
+                doc = cu.try_call(doc, "GetNext")
             
             return self._result(True, f"{len(docs)} document(s) open",
                               SwErrors.swSuccess, {"documents": docs})

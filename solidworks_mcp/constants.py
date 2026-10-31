@@ -55,13 +55,18 @@ class SwPlanes:
     
     @classmethod
     def get(cls, name: str) -> str:
-        """Get plane name from short name"""
+        """
+        Short name -> standard plane name. Any other name (e.g. a reference
+        plane 'P25' or 'Plane1') is returned unchanged.
+        """
         plane_map = {
-            "front": cls.FRONT,
-            "top": cls.TOP,
-            "right": cls.RIGHT,
+            "front": cls.FRONT, "front plane": cls.FRONT,
+            "top": cls.TOP, "top plane": cls.TOP,
+            "right": cls.RIGHT, "right plane": cls.RIGHT,
         }
-        return plane_map.get(name.lower(), cls.FRONT)
+        if not name:
+            return cls.FRONT
+        return plane_map.get(name.strip().lower(), name.strip())
     
     @classmethod
     def all(cls) -> list:
@@ -74,15 +79,18 @@ class SwPlanes:
 # ============================================================================
 
 class SwEndConditions(IntEnum):
-    """Extrusion end conditions"""
+    """swEndConditions_e — values read from SOLIDWORKS 2026 swconst.tlb"""
     swEndCondBlind = 0
     swEndCondThroughAll = 1
-    swEndCondThroughAllBoth = 2
-    swEndCondThroughNext = 3
-    swEndCondUpToVertex = 4
-    swEndCondUpToSurface = 5
+    swEndCondThroughNext = 2
+    swEndCondUpToVertex = 3
+    swEndCondUpToSurface = 4
+    swEndCondOffsetFromSurface = 5
     swEndCondMidPlane = 6
-    swEndCondOffsetFromSurface = 7
+    swEndCondUpToBody = 7
+    swEndCondThroughAllBoth = 9
+    swEndCondUpToSelection = 10
+    swEndCondUpToNext = 11
 
 
 # ============================================================================
@@ -98,8 +106,16 @@ class SwMateTypes(IntEnum):
     swMateTANGENT = 4
     swMateDISTANCE = 5
     swMateANGLE = 6
+    swMateSYMMETRIC = 8
+    swMateCAMFOLLOWER = 9
+    swMateGEAR = 10
+    swMateWIDTH = 11            # verified against swconst.tlb (SW 2026); was 18 (= LINEARCOUPLER)
+    swMatePATH = 15
     swMateLOCK = 16
-    swMateWIDTH = 18
+    swMateSCREW = 17
+    swMateLINEARCOUPLER = 18
+    swMateSLOT = 21
+    swMateHINGE = 22
 
 
 # ============================================================================

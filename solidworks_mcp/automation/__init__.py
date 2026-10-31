@@ -13,13 +13,32 @@ from .sketch_ext import SketchExtOperations
 from .advanced_features import AdvancedFeatureOperations
 from .model_ops import ModelOperations
 from .assembly import AssemblyOperations
+from .drawing import DrawingOperations
+from .sweep_loft import SweepLoftOperations
+from .batch_import import BatchImportOperations
+from .edit_ops import EditOperations
+from .detail_features import DetailFeatureOperations
+from .core_ops import CoreOperations
+from .part_plus import PartPlusOperations
+from .assembly_plus import AssemblyPlusOperations
+from .part_mold import PartMoldOperations
+from .assembly_tools import AssemblyToolsOperations
+from .drawing_plus import DrawingPlusOperations
+from .sheet_metal import SheetMetalOperations
+from .surfaces import SurfaceOperations
 
 
-class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
+class SolidWorksAutomation(CoreOperations, _BaseAutomation, DocumentOperations,
                            SketchOperations, FeatureOperations,
                            SelectionOperations, SketchExtOperations,
                            AdvancedFeatureOperations, ModelOperations,
-                           AssemblyOperations):
+                           AssemblyOperations, DrawingOperations,
+                           SweepLoftOperations, BatchImportOperations,
+                           EditOperations, DetailFeatureOperations,
+                           PartPlusOperations, AssemblyPlusOperations,
+                           PartMoldOperations, AssemblyToolsOperations,
+                           DrawingPlusOperations, SheetMetalOperations,
+                           SurfaceOperations):
     """
     Complete SolidWorks automation class
     
@@ -56,4 +75,12 @@ __all__ = [
     "AdvancedFeatureOperations",
     "ModelOperations",
     "AssemblyOperations",
+    "DrawingOperations",
+    "SweepLoftOperations",
+    "BatchImportOperations",
+    "EditOperations",
+    "DetailFeatureOperations",
+    "CoreOperations",
+    "PartPlusOperations",
+    "AssemblyPlusOperations",
 ]

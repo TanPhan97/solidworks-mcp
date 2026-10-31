@@ -1,273 +1,120 @@
-# SolidWorks MCP Server 🔧
+# SolidWorks MCP Server
 
-> Automate SolidWorks using natural language through Claude AI and the Model Context Protocol (MCP)
+Control SolidWorks from Claude in plain language: parts, assemblies, drawings, exports.
+**132 tools** — parts, surfaces, sheet metal, assemblies, drawings · v4.4.0 · tested live on **SOLIDWORKS 2026** · Windows · Python 3.10+
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![SolidWorks 2025](https://img.shields.io/badge/SolidWorks-2023--2025-red.svg)](https://www.solidworks.com/)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-stdio-green.svg)](https://modelcontextprotocol.io/)
+[![SolidWorks](https://img.shields.io/badge/SolidWorks-2024--2026-red.svg)](https://www.solidworks.com/)
 
----
+| | | |
+|:-:|:-:|:-:|
+| ![part](docs/plate.png) | ![surface](docs/surf_thicken.png) | ![sheet metal](docs/sheet.png) |
+| Hole Wizard, fillet, draft | Surface extrude + thicken | Base + edge flange |
+| ![sweep](docs/sweep.png) | ![assembly](docs/asmplus.png) | ![mates](docs/asmtools.png) |
+| Sweep along line + arc | Component pattern, exploded view | Slot / hinge / width / gear mates |
 
-## 🎯 What is This?
+> 📘 Full manual (Vietnamese, Word): [docs/SolidWorks_MCP_Huong_dan.docx](docs/SolidWorks_MCP_Huong_dan.docx) · 📝 [CHANGELOG](CHANGELOG.md)
 
-**SolidWorks MCP Server** is a production-ready [Model Context Protocol](https://modelcontextprotocol.io/) server that lets Claude AI control SolidWorks through natural language. Instead of manually clicking through menus, you simply tell Claude what to design — and it builds it for you.
+## Quick start
 
-**Example prompts you can use:**
-- *"Create a new part, draw a circle with radius 30mm and extrude it 15mm"*
-- *"Add a fillet of 2mm to all edges"*
-- *"Draw a hexagon and cut extrude it 10mm"*
-- *"List all features in the current part"*
+Requires Windows, SolidWorks, Python 3.10+ (64-bit) and Claude Desktop.
 
----
-
-## ✨ Features
-
-- ✅ **58 Tools** covering parts, sketches, features, selection, parametric edit, properties, export and assemblies
-- ✅ **SolidWorks 2023–2025 Compatible** with version-aware API fallbacks
-- ✅ **Auto-detects SolidWorks** installation via Windows registry
-- ✅ **Multi-unit support** — mm, cm, inch, meter, foot
-- ✅ **Modular architecture** — clean, extensible Python package
-- ✅ **Robust error handling** — cascading fallback chains for COM API
-- ✅ **JSON configuration** — easy to customize without touching code
-- ✅ **Comprehensive logging** — full debug output for troubleshooting
-
----
-
-## 🛠️ Available Tools
-
-| Category | Tool | Description |
-|----------|------|-------------|
-| **Connection** | `connect_solidworks` | Connect to running SolidWorks instance |
-| **Connection** | `get_solidworks_info` | Get version and installation info |
-| **Documents** | `create_new_part` | Create a new part document |
-| **Documents** | `create_new_assembly` | Create a new assembly document |
-| **Documents** | `open_document` | Open an existing SolidWorks file |
-| **Documents** | `close_document` | Close the active document |
-| **Documents** | `save_document` | Save the active document |
-| **Documents** | `list_open_documents` | List all open documents |
-| **Sketches** | `create_sketch` | Create a sketch on a plane (Front/Top/Right) |
-| **Sketches** | `close_sketch` | Exit the active sketch |
-| **Sketches** | `draw_circle` | Draw a circle by center and radius |
-| **Sketches** | `draw_rectangle` | Draw a rectangle by two corners |
-| **Sketches** | `draw_line` | Draw a line between two points |
-| **Sketches** | `draw_arc` | Draw an arc by center and angles |
-| **Sketches** | `draw_polygon` | Draw a regular polygon (triangle, hex, etc.) |
-| **Features** | `extrude_sketch` | Boss-extrude the active sketch |
-| **Features** | `cut_extrude` | Cut-extrude to remove material |
-| **Features** | `fillet_edges` | Add fillets to selected edges |
-| **Features** | `chamfer_edges` | Add chamfers to selected edges |
-| **Features** | `list_features` | List all features in the model |
-| **Utilities** | `set_units` | Change default unit (mm/inch/cm/m/ft) |
-| **Utilities** | `execute_python` | Execute custom Python code in SW context |
-
----
-
-## 🧩 Extended Tools (v4.1) — +33 tools
-
-Registered from `solidworks_mcp/tools_ext.py` (declarative table, one line per tool → automation method).
-
-| Group | Tool | Purpose |
-|---|---|---|
-| **Selection** | `list_edges` | Edges with stable index: type (line/circle/arc), length, midpoint, direction, radius |
-| | `list_faces` | Faces: type, area, normal / radius, point on face |
-| | `select_edges` | By index or filter: `parallel_to`, `axis_parallel_to`, `radius`, `min/max_length`, `on_face_index` |
-| | `select_faces` | By index or filter: `face_type`, `normal` (`z`, `+z`, `-z`…), `radius`, `min_area` |
-| | `select_entity` | Generic SelectByID2 by name / model point / sketch point |
-| | `clear_selection`, `get_selection` | Selection housekeeping / inspection |
-| **Sketch** | `draw_centerline`, `draw_slot`, `sketch_fillet` | Geometry |
-| | `add_sketch_dimension` | Smart dimension (length / diameter / radius / distance / angle) with driving value |
-| | `add_sketch_relation` | horizontal, vertical, coincident, concentric, tangent, parallel, perpendicular, collinear, equal, midpoint, symmetric, fixed |
-| **Features** | `revolve` | Boss / cut revolve, mid-plane, thin |
-| | `shell` | Remove faces by index or normal |
-| | `linear_pattern`, `circular_pattern` | Direction / axis as edge, face, axis or plane reference |
-| | `mirror` | Features or bodies about plane / planar face |
-| | `create_ref_plane` | Offset, angle-through-axis, mid-plane |
-| **Parametric** | `list_dimensions`, `set_dimension` | Edit `D1@Sketch1` etc., rebuild, report rebuild errors |
-| | `suppress_feature`, `rebuild`, `undo` | Feature state / recovery |
-| **Properties** | `get_mass_properties` | Mass, volume, area, density, CoM, principal MOI |
-| | `set_material` | Library material by exact name |
-| | `set_custom_property`, `get_custom_properties` | PartNo / Description / Revision … |
-| **Output** | `export_document` | STEP, IGES, Parasolid, STL, 3MF, eDrawings, PDF/DXF (copy; active file unchanged) |
-| | `set_view`, `capture_view` | Standard views; viewport returned **as an image** for visual checks |
-| **Assembly** | `insert_component`, `add_mate`, `list_components` | Coincident / concentric / parallel / perpendicular / tangent / distance / angle / lock |
-
-**Reference spec** (used by patterns, mirror, planes, revolve axis):
-`{"plane": "Front"}` · `{"edge_index": 12}` · `{"face_index": 6}` · `{"name": "Axis1", "type": "AXIS"}` · `{"point": [x, y, z], "type": "FACE"}`
-
-**Typical flow**
-```
-list_edges(parallel_to="z")          → see vertical edges
-select_edges(parallel_to="z")        → select them
-fillet_edges(radius=3)
-list_faces(face_type="cylinder")     → hole face index 6
-circular_pattern(features=["Cut-Extrude1"], axis={"face_index": 6}, count=6)
-set_material("6061-T6 (SS)"); get_mass_properties()
-export_document("C:/out/part.step"); capture_view("isometric")
-```
-
-**Fixes in v4.1**
-- `fillet_edges`: `FeatureFillet3` now called with its 14 parameters (was 15 → always failed, silently falling back).
-- `chamfer_edges`: `InsertFeatureChamfer` now called with 8 parameters in documented order (was 7, wrong order).
-- `requirements.txt`: `mcp<2` — the server uses the 1.x low-level decorator API, which mcp 2.x removed.
-
-**Tests**
-- Offline (any OS, fake COM): `python -m pytest solidworks_mcp/tests -q`
-- Live (Windows + SolidWorks running): `python scripts\smoke_test_ext.py C:\temp\swmcp_out`
-
----
-
-## 📋 Requirements
-
-- **OS:** Windows 10 or Windows 11
-- **SolidWorks:** 2023, 2024, or 2025 (must be installed and licensed)
-- **Python:** 3.10 or higher
-- **Claude:** Claude Desktop app or Claude Code
-
----
-
-## ⚡ Quick Start
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/alisamsam/solidworks-mcp.git
-cd solidworks-mcp
-```
-
-### 2. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure Claude Desktop
-
-**Automatic (recommended, Windows):** merges into the existing config, keeps other servers, writes a backup:
-
-```
+```bat
+git clone https://github.com/TanPhan97/solidworks-mcp.git D:\Solidworks-mcp
+cd D:\Solidworks-mcp
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe scripts\register_claude_desktop.py
 ```
-Use `--dry-run` to preview, `--remove` to unregister.
 
-**Manual:**
+Then **Quit** Claude Desktop from the system tray, reopen it, and check that **Settings → Developer** shows `solidworks` as running.
+Try: *"Connect to SolidWorks and tell me the version."*
 
-Add the following to your `claude_desktop_config.json`:
+If the server does not show up, pass the file from **Settings → Developer → Edit Config** explicitly:
+`register_claude_desktop.py --config "C:\path\to\claude_desktop_config.json"` (also: `--list`, `--dry-run`, `--remove`).
 
-**Location:** `C:\Users\YOUR_NAME\AppData\Roaming\Claude\claude_desktop_config.json`
+## What you can ask
 
-```json
-{
-  "mcpServers": {
-    "solidworks": {
-      "command": "python",
-      "args": ["C:\\path\\to\\solidworks-mcp\\solidworks_mcp_server.py"]
-    }
-  }
-}
-```
+- *"New part: 60×40 rectangle on Top, extrude 10 mm, three M3x0.5 tapped holes 8 deep, fillet the vertical edges R3, material 6061-T6, save to D:\Work\plate.SLDPRT and show me an isometric view."*
+- *"Change Boss-Extrude1 depth to 12 mm"* · *"Create global variable Wall = 2 and drive the shell thickness with it."*
+- *"New assembly with plate and cover, mate them, pattern the cover 3× at 100 mm, check interference, make an exploded view."*
+- *"Drawing of plate.SLDPRT: 3 views + iso, section A-A, detail at 3:1, model dimensions, center marks, then export PDF."*
+- *"Export every part in D:\Project to STEP and STL, drawings to PDF."*
+- *"Curved shell: extrude an R50 arc surface 40 mm and thicken it 2 mm; knit these surfaces into a solid."*
+- *"Sheet metal 80×50, t=1.5, R2; 20 mm edge flange on the front edge; export the flat pattern to DXF."*
+- *"Pin in the slot, second pin hinged in the hole, gears 1:2; export the BOM to CSV and Pack and Go to D:\Release."*
+- *"Drawing: hole table, revision A 'INITIAL RELEASE', auxiliary view of the chamfer."*
 
-### 4. Launch
+## Tools
 
-1. Open **SolidWorks** first
-2. Restart **Claude Desktop**
-3. In Claude, type: *"Connect to SolidWorks"*
-4. Start designing! 🎉
+| Group | Tools |
+|---|---|
+| **Connection & documents** (12) | `connect_solidworks`, `get_solidworks_info`, `create_new_part`, `create_new_assembly`, `open_document`, `import_file`, `save_document`, `close_document`, `activate_document`, `get_document_info`, `list_open_documents`, `set_units` |
+| **Sketch** (22) | `create_sketch`, `create_sketch_on_face`, `close_sketch`, `get_sketch_status`, `draw_line`, `draw_circle`, `draw_rectangle`, `draw_arc`, `draw_polygon`, `draw_centerline`, `draw_slot`, `draw_spline`, `draw_ellipse`, `sketch_fillet`, `convert_entities`, `offset_entities`, `sketch_mirror`, `sketch_pattern`, `set_construction`, `add_sketch_dimension`, `add_sketch_relation`, `sketch_text` |
+| **Part features** (19) | `extrude`, `extrude_sketch`, `cut_extrude`, `revolve`, `loft`, `sweep`, `fillet_edges`, `chamfer_edges`, `shell`, `rib`, `draft`, `hole_wizard`, `linear_pattern`, `circular_pattern`, `mirror`, `create_ref_plane`, `create_ref_axis`, `scale_part`, `cosmetic_thread` |
+| **Multi-body** (4) | `list_bodies`, `combine_bodies`, `split_body`, `delete_body` |
+| **Surface** (9) | `surface_extrude`, `surface_revolve`, `planar_surface`, `offset_surface`, `loft_surface`, `knit_surfaces`, `thicken_surface`, `cut_with_surface`, `delete_face` |
+| **Sheet metal** (4) | `base_flange`, `edge_flange`, `flatten`, `export_flat_pattern` |
+| **Selection & topology** (8) | `list_edges`, `list_faces`, `select_edges`, `select_faces`, `select_entity`, `clear_selection`, `get_selection`, `measure` |
+| **Parametric edit** (15) | `list_features`, `get_feature_info`, `edit_feature`, `list_dimensions`, `set_dimension`, `list_equations`, `set_equation`, `list_configurations`, `add_configuration`, `activate_configuration`, `suppress_feature`, `delete_feature`, `rename_feature`, `rebuild`, `undo` |
+| **Properties & output** (8) | `get_mass_properties`, `set_material`, `set_custom_property`, `get_custom_properties`, `export_document`, `batch_export`, `set_view`, `capture_view` |
+| **Assembly** (14) | `insert_component`, `add_mate`, `list_components`, `list_mates`, `move_component`, `fix_component`, `set_component_state`, `replace_component`, `component_pattern`, `check_interference`, `create_exploded_view`, `add_advanced_mate`, `export_bom`, `pack_and_go` |
+| **Drawing** (16) | `create_drawing`, `list_drawing_views`, `add_drawing_view`, `add_section_view`, `add_detail_view`, `insert_model_annotations`, `insert_center_marks`, `insert_bom`, `auto_balloon`, `add_note`, `add_sheet`, `activate_sheet`, `add_revision`, `insert_hole_table`, `add_auxiliary_view`, `add_broken_out_section` |
+| **Advanced** (1) | `execute_python` |
 
----
+All lengths take an optional `unit` (mm default; cm, m, inch, ft). Angles are in degrees.
 
-## 📁 Project Structure
+## Configuration (optional)
 
-```
-solidworks-mcp/
-├── solidworks_mcp_server.py      # Entry point
-├── solidworks_mcp/               # Main package
-│   ├── __init__.py              # Package exports (v3.0.0)
-│   ├── server.py                # MCP server & tool definitions
-│   ├── config.py                # Configuration management
-│   ├── config.json              # Default settings
-│   ├── constants.py             # SolidWorks constants & enums
-│   ├── automation/              # Core automation modules
-│   │   ├── base.py             # Connection management
-│   │   ├── documents.py        # Document operations
-│   │   ├── sketches.py         # Sketch operations
-│   │   └── features.py         # Feature operations (SW 2025 fixed)
-│   └── utils/                   # Utility modules
-│       ├── units.py            # Unit conversion system
-│       └── sw_finder.py        # Auto-detect SolidWorks
-├── requirements.txt
-├── .gitignore
-└── DEVELOPMENT_ROADMAP.md       # Future development plan
-```
-
----
-
-## ⚙️ Configuration
-
-Edit `solidworks_mcp/config.json` to customize behavior:
+`solidworks_mcp/config.json`. Every key is optional, and `auto` means auto-detect:
 
 ```json
-{
-  "exe_path": "auto",
-  "default_unit": "mm",
-  "startup_timeout": 120,
-  "log_level": "INFO",
-  "default_extrude_depth": 10.0,
-  "default_fillet_radius": 2.0
-}
+{ "default_unit": "mm", "part_template": "auto", "assembly_template": "auto",
+  "drawing_template": "C:\\Templates\\A4.drwdot", "log_level": "INFO" }
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `exe_path` | `"auto"` | Path to SLDWORKS.exe or auto-detect |
-| `default_unit` | `"mm"` | Default unit for all dimensions |
-| `startup_timeout` | `120` | Seconds to wait for SW startup |
-| `log_level` | `"INFO"` | Logging verbosity |
+Logs go to `solidworks_mcp/solidworks_mcp.log`; stdout is reserved for MCP.
 
----
+## Testing
 
-## 🔧 SolidWorks 2025 Compatibility
+```bat
+.venv\Scripts\python.exe -m pytest -q solidworks_mcp\tests          :: offline, fake COM (51 tests)
+.venv\Scripts\python.exe scripts\smoke_test.py D:\swmcp_test        :: live, SolidWorks open (216 checks, 13 sections)
+```
 
-This server includes special handling for SolidWorks 2025 API changes:
+Use a new output folder for each smoke run. SolidWorks cannot open two files with the same name.
 
-- **Extrusion fallback chain:** `FeatureExtrusion3` → `FeatureExtrusion2` → `FeatureBossSimple`
-- **Safe property access** for `feat.Name`, `feat.GetTypeName2()`, `IsSuppressed2()`
-- **stdout capture** fix for `execute_python` tool
-- **Registry-based** SolidWorks auto-detection
+## Troubleshooting
 
----
+| Problem | Fix |
+|---|---|
+| Server missing in Claude Desktop | Register with `--config` (Store installs use another folder), then fully Quit and reopen |
+| "No part template found" | Set `part_template` in config.json or a default template in SolidWorks Options |
+| A tool hangs or times out | A modal dialog is open in SolidWorks: close it. The known dialogs are suppressed in code |
+| "Critically low on memory" | Too many open documents: close some |
+| Advanced mate reports over-defined | The first inserted component is fixed: `fix_component(names, fixed=false)` |
+| New tools do not appear | Quit and reopen Claude Desktop |
 
-## 🤝 Contributing
+## Safety
 
-Contributions are welcome! Please:
+`execute_python` runs arbitrary Python with your user rights. Use it only in trusted setups, or remove it from `TOOL_TABLE` in `solidworks_mcp/tools_ext.py`.
+The server never calls CloseAllDocuments, and batch export never closes documents that were already open or have unsaved changes.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m "Add my feature"`
-4. Push to the branch: `git push origin feature/my-feature`
-5. Open a Pull Request
+## Project layout
 
----
+```
+solidworks_mcp_server.py      entry point (launched by Claude Desktop)
+solidworks_mcp/server.py      MCP server: list_tools / call_tool
+solidworks_mcp/tools_ext.py   tool registry: schema + dispatch for all 132 tools
+solidworks_mcp/automation/    SolidWorks logic (sketch, features, surfaces, sheet metal, assembly, drawing…)
+solidworks_mcp/tests/         offline unit tests
+scripts/                      smoke test, Claude Desktop registration
+```
 
-## 📄 License
+To add a tool, write the method in an `automation/` mixin and add one line to `TOOL_TABLE` and `CATEGORIES`.
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+## Credits
 
----
-
-## 👤 Author
-
-**Samsaam Ali Baig**
-- GitHub: [@alisamsam](https://github.com/alisamsam)
-
----
-
-## 🙏 Acknowledgements
-
-- [Anthropic](https://anthropic.com) for Claude AI and the MCP framework
-- [SolidWorks](https://www.solidworks.com) COM API documentation
-- Inspired by [ros2-claude-code-template](https://github.com/harunkurt/ros2-claude-code-template) by Harun KURT
-
----
-
-⭐ **If this project helps you, please give it a star!**
+Original project by **Samsaam Ali Baig** ([alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp)), MIT License.
+v4.x extensions (part / assembly / drawing tools, registry, tests) by **Phan Chu Tan**.

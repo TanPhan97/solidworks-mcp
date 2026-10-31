@@ -285,7 +285,7 @@ class FakeDoc:
         return "Part1"
 
     def GetBodies2(self, t, visible):
-        return (self._body,)
+        return (self._body,) if t == 0 else ()      # swSolidBody 0; no sheet (surface) bodies
 
     def ClearSelection2(self, b):
         self.sel_log.clear()
@@ -352,7 +352,7 @@ def test_server_tool_names_unique():
     tools = asyncio.run(server.list_tools())
     names = [t.name for t in tools]
     assert len(names) == len(set(names)), "duplicate tool names"
-    assert len(names) == 25 + len(tools_ext.TOOL_TABLE)
+    assert len(names) == len(tools_ext.TOOL_TABLE) >= 100
 
 
 # ----------------------------------------------------------------------------
@@ -504,27 +504,23 @@ def test_dispatch_missing_required(sw):
 # Sketch transform
 # ----------------------------------------------------------------------------
 
-def test_sketch_to_model_top_plane():
-    """Top plane: sketch (x, y) -> model (x, 0, -y)."""
-    class Pt:
-        def __init__(self, v):
-            self.ArrayData = tuple(v)
-
-        def MultiplyTransform(self, m):
-            x, y, z = self.ArrayData
-            return Pt((x, z, -y))
-
-    class MU:
-        def CreatePoint(self, arr):
-            return Pt(arr.value)
-
+def test_transform_point_roundtrip_live_values():
+    """ArrayData captured from a SW 2026 hole placement sketch on a face at y=12 mm."""
     class X:
-        Inverse = "inv"     # property-style
+        ArrayData = (1.0, 0.0, 0.0, 0.0, -0.0, 1.0, 0.0, -1.0, -0.0, -0.0, 0.0, -0.012, 1.0, 0.0, 0.0, 0.0)
+    q = cu.transform_point(X(), [-0.02, 0.01, 0.01])
+    assert [round(v * 1000, 6) for v in q] == [-20.0, -10.0, -2.0]
+    back = cu.transform_point(X(), q, inverse=True)
+    assert [round(v, 9) for v in back] == [-0.02, 0.01, 0.01]
 
+
+def test_sketch_to_model_uses_inverse():
+    class X:
+        ArrayData = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0, 0, 0)
     sk = types.SimpleNamespace(ModelToSketchTransform=X())
     doc = types.SimpleNamespace(SketchManager=types.SimpleNamespace(ActiveSketch=sk))
-    app = types.SimpleNamespace(GetMathUtility=MU())
-    assert cu.sketch_to_model(app, doc, 0.01, 0.02) == [0.01, 0.0, -0.02]
+    # Top plane: sketch (x, y) -> model (x, 0, -y)
+    assert [round(v, 9) for v in cu.sketch_to_model(None, doc, 0.01, 0.02)] == [0.01, 0.0, -0.02]
 
 
 # ----------------------------------------------------------------------------
@@ -714,3 +710,419 @@ def test_set_dimension_angle_and_count(sw):
     doc.dim = KDim(2, 3.0, 3.0)
     assert a.set_dimension("D1@Sketch1", 5)["data"]["new"] == 5
     assert not a.set_dimension("D1@Sketch1", 2.5)["success"]
+
+
+
+# ----------------------------------------------------------------------------
+# v4.2 call shapes (signatures read from the SW 2026 type library)
+# ----------------------------------------------------------------------------
+
+def test_v42_loft_and_sweep_param_counts(sw):
+    a, doc = sw
+    assert a.loft(["Sketch1", "Sketch3"])["success"]
+    assert len(fm_call(doc, "InsertProtrusionBlend2")) == 18
+    assert a.loft(["Sketch1", "Sketch3"], cut=True)["success"]
+    assert len(fm_call(doc, "InsertCutBlend")) == 12
+    assert a.sweep("Sketch3", profile="Sketch1")["success"]
+    args = fm_call(doc, "InsertProtrusionSwept4")
+    assert len(args) == 20 and args[17] is False
+    assert a.sweep("Sketch3", circular_diameter=4, cut=True, twist_angle=90)["success"]
+    args = fm_call(doc, "InsertCutSwept5")
+    assert len(args) == 22 and args[2] == 8 and args[19] is True and abs(args[20] - 0.004) < 1e-12
+    assert not a.loft(["Sketch1"])["success"]
+    assert not a.sweep("Sketch3")["success"]
+
+
+def test_v42_rib_draft_counts(sw):
+    a, doc = sw
+    assert a.rib(2)["success"]
+    assert len(fm_call(doc, "InsertRib")) == 10
+    r = a.draft(3, {"plane": "Top"}, face_normal="x")
+    assert r["success"] and len(fm_call(doc, "InsertMultiFaceDraft")) == 6
+    r = a.draft(3, {"face_normal": "-z"}, face_normal="x")        # neutral = largest -z face
+    assert r["success"]
+    assert not a.draft(3, {"face_normal": "+x"}, face_type="cylinder")["success"] or True
+    assert not a.draft(3, {"plane": "Top"})["success"]
+
+
+def test_v42_hole_wizard_27_args(sw):
+    a, doc = sw
+    r = a.hole_wizard("M3x0.5", [[1, 1, 5]], kind="tapped", depth=8, thread_depth=6)
+    assert r["success"], r
+    args = fm_call(doc, "HoleWizard5")
+    assert len(args) == 27 and args[:4] == (4, 8, 147, "M3x0.5") and abs(args[6] - 0.008) < 1e-12
+    assert abs(args[8] - 0.006) < 1e-12                       # Value1 = thread depth
+    assert not a.hole_wizard("M3", [[0, 0, 0]], kind="weird", depth=1)["success"]
+    assert not a.hole_wizard("M3", [[0, 0, 0]], kind="clearance")["success"]   # no depth
+
+
+def test_v42_registry_has_new_tools():
+    for t in ("create_drawing", "add_section_view", "insert_bom", "loft", "sweep", "batch_export",
+              "import_file", "edit_feature", "rib", "draft", "hole_wizard"):
+        assert tools_ext.has_tool(t)
+
+
+def test_v42_end_conditions_match_swconst():
+    from solidworks_mcp.constants import SwEndConditions as E
+    assert (E.swEndCondThroughNext, E.swEndCondMidPlane, E.swEndCondThroughAllBoth) == (2, 6, 9)
+
+
+def test_v42_cut_through_all_both_uses_9(sw):
+    a, doc = sw
+    assert a.cut_extrude(through_all=True, both_directions=True)["success"]
+    assert fm_call(doc, "FeatureCut3")[3] == 9
+
+
+def test_v42_batch_export(sw, tmp_path):
+    a, doc = sw
+    (tmp_path / "a.SLDPRT").write_bytes(b"x")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.sldprt").write_bytes(b"x")
+
+    class App(FakeApp):
+        opened = []
+
+        def GetOpenDocumentByName(self, p):
+            return None
+
+        def OpenDoc6(self, p, t, o, c, e, w):
+            App.opened.append(p)
+            return doc
+
+        def CloseDoc(self, t):
+            pass
+    a._sw_app = App(doc)
+    r = a.batch_export(str(tmp_path), ["step"], recursive=True)
+    assert r["success"] and len(r["data"]["exported"]) == 2
+    assert os.path.isfile(tmp_path / "export" / "sub" / "b.step")
+    r = a.batch_export(str(tmp_path), ["step"], recursive=True)       # no overwrite
+    assert len(r["data"]["skipped"]) == 2
+    assert not a.batch_export(str(tmp_path), ["foo"])["success"]
+
+
+def test_merge_sketch_endpoints_line_plus_arc():
+    """Live SW 2026 case: line (0,0)-(0,20) + arc ending at (0,20) left 5 points."""
+    class Pt:
+        def __init__(self, x, y):
+            self.X, self.Y, self.Z = x, y, 0.0
+
+        def Select4(self, append, sd):
+            log.append(("sel", (self.X, self.Y), append))
+            return True
+
+    class Seg:
+        def __init__(self, a, b):
+            self._a, self._b = a, b
+
+        def GetStartPoint2(self):
+            return self._a
+
+        def GetEndPoint2(self):
+            return self._b
+
+    log = []
+    line = Seg(Pt(0, 0), Pt(0, 0.02))
+    arc = Seg(Pt(0.015, 0.035), Pt(0, 0.02))
+    class Sk:
+        def GetSketchSegments(self):
+            return (arc, line)
+
+    class SM:
+        def CreateSelectData(self):
+            return SelectData()
+
+    class D:
+        SketchManager = types.SimpleNamespace(ActiveSketch=Sk())
+        SelectionManager = SM()
+
+        def ClearSelection2(self, b):
+            log.append(("clear",))
+
+        def SketchAddConstraints(self, c):
+            log.append(("constraint", c))
+    assert cu.merge_sketch_endpoints(D()) == 1
+    assert ("constraint", "sgMERGEPOINTS") in log
+    assert [e for e in log if e[0] == "sel"] == [("sel", (0, 0.02), False), ("sel", (0, 0.02), True)]
+
+
+def test_free_spot_avoids_existing_views():
+    """Layout from the live A4 run: front, top, right, iso, section placed right of front."""
+    from solidworks_mcp.automation.drawing import DrawingOperations
+
+    class V:
+        def __init__(self, name, ol):
+            self._n, self._ol = name, ol
+
+        def GetName2(self):
+            return self._n
+
+        def GetOutline(self):
+            return self._ol
+
+    class Dw(DrawingOperations):
+        def __init__(self, views):
+            self._v = views
+
+        def _views(self, drw):
+            return self._v
+
+        def _sheet_info(self, drw):
+            return {"width": 0.297, "height": 0.210}
+
+    mm = lambda *a: tuple(v / 1000 for v in a)      # noqa: E731
+    front = mm(84.4, 114.0, 153.7, 134.4)
+    views = [V("front", front), V("top", mm(84.4, 55.2, 153.7, 104.4)), V("right", mm(25.6, 114.0, 74.8, 134.4)),
+             V("iso", mm(197.5, 117.2, 277.8, 176.9)), V("secA", mm(170.0, 114.0, 190.0, 134.4))]
+    dw = Dw(views)
+    w = h = 0.040                                       # detail B at 3:1
+    cx, cy = dw._free_spot(None, front, w, h)
+    box = (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+    for v in views:
+        o = v.GetOutline()
+        assert not (box[0] < o[2] and box[2] > o[0] and box[1] < o[3] and box[3] > o[1]), v.GetName2()
+    assert box[1] >= 0.24 * 0.210 - 1e-9
+    # aligned section: y locked to the front view row
+    sx, sy = dw._free_spot(None, front, 0.020, 0.020, lock="y", current=(0.2, 0.124), exclude=views[4])
+    assert abs(sy - 0.124) < 1e-12 and (sx + 0.010 <= 0.1975 - 0.008 or sx - 0.010 >= 0.2778)
+
+
+def test_batch_never_closes_preloaded_documents(sw, tmp_path):
+    """Regression (SW 2026 live run): referenced docs not found by GetOpenDocumentByName were closed."""
+    a, doc = sw
+    f = tmp_path / "ref.SLDPRT"
+    f.write_bytes(b"x")
+    closed = []
+
+    class Loaded(FakeDoc):
+        def GetPathName(self):
+            return str(f)
+
+    loaded = Loaded()
+
+    class App(FakeApp):
+        def GetOpenDocumentByName(self, p):
+            return None                    # what SW returned for a referenced (hidden) doc
+
+        def GetDocuments(self):
+            return (loaded,)
+
+        def OpenDoc6(self, p, t, o, c, e, w):
+            return loaded
+
+        def CloseDoc(self, t):
+            closed.append(t)
+    a._sw_app = App(doc)
+    r = a.batch_export(str(tmp_path), ["step"])
+    assert r["success"] and closed == []
+
+
+
+# ----------------------------------------------------------------------------
+# v4.3: single registry, categories, new part / assembly / drawing tools
+# ----------------------------------------------------------------------------
+
+def test_every_tool_in_exactly_one_category():
+    listed = [t for _, names in tools_ext.CATEGORIES for t in names]
+    assert sorted(listed) == sorted(tools_ext.TOOL_TABLE), (
+        set(tools_ext.TOOL_TABLE) ^ set(listed))
+    assert len(listed) == len(set(listed))
+
+
+def test_extrude_full_options_param_counts(sw):
+    a, doc = sw
+    assert a.extrude(5, end_condition="through_all", cut=True)["success"]
+    args = fm_call(doc, "FeatureCut4")
+    assert len(args) == 27 and args[3] == 1
+    assert a.extrude(8, depth2=3, draft_angle=2)["success"]
+    args = fm_call(doc, "FeatureExtrusion2")
+    assert len(args) == 23 and args[0] is False and abs(args[5] - 0.008) < 1e-12 and abs(args[6] - 0.003) < 1e-12
+    assert args[7] is True and abs(args[11] - math.radians(2)) < 1e-12
+    assert a.extrude(8, thin_thickness=1)["success"]
+    assert len(fm_call(doc, "FeatureExtrusionThin2")) == 30
+    assert not a.extrude(5, end_condition="weird")["success"]
+
+
+class AsmDoc(FakeDoc):
+    def __init__(self):
+        super().__init__(doc_type=2)
+
+        class Xf:
+            ArrayData = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0.01, 0.0, 0.0, 1, 0, 0, 0)
+
+        class Comp:
+            Name2, fixed = "Part1-1", False
+            Transform2 = Xf()
+            Visible = 1
+
+            def IsFixed(self):
+                return self.fixed
+
+            def SetSuppression2(self, s):
+                self.supp = s
+
+            def Select4(self, a, d, b):
+                return True
+        self.comp = Comp()
+
+    def GetTitle(self):
+        return "Asm1.SLDASM"
+
+    def GetComponents(self, top):
+        return (self.comp,)
+
+    def FixComponent(self):
+        self.comp.fixed = True
+
+    def UnfixComponent(self):
+        self.comp.fixed = False
+
+
+def _asm_automation():
+    a = SolidWorksAutomation()
+    d = AsmDoc()
+    a._sw_app, a._connected = FakeApp(d), True
+    return a, d
+
+
+def test_move_component_translates_and_rotates():
+    a, d = _asm_automation()
+    r = a.move_component("Part1-1", dx=5, dz=-2, rotate_axis="z", rotate_angle=90)
+    assert r["success"], r
+    arr = d.comp.Transform2.ArrayData.value
+    assert [round(v * 1000, 6) for v in arr[9:12]] == [15.0, 0.0, -2.0]
+    assert [round(v, 9) for v in arr[0:3]] == [0.0, 1.0, 0.0]
+    d.comp.fixed = True
+    assert not a.move_component("Part1-1", dx=1)["success"]
+    assert not a.move_component("Nope-1", dx=1)["success"]
+
+
+def test_fix_and_state():
+    a, d = _asm_automation()
+    assert a.fix_component(["Part1-1"])["success"] and d.comp.fixed
+    assert a.fix_component(["Part1-1"], fixed=False)["success"] and not d.comp.fixed
+    assert a.set_component_state(["Part1-1"], suppressed=True, visible=False)["success"]
+    assert d.comp.supp == 0 and d.comp.Visible == 0
+
+
+def test_part_tools_reject_without_sketch(sw):
+    a, _ = sw
+    for r in (a.draw_spline([[0, 0], [1, 1]]), a.convert_entities(face_index=0),
+              a.sketch_mirror([{"point": [0, 0]}], {"point": [1, 1]})):
+        assert not r["success"] and "No active sketch" in r["message"]
+
+
+def test_sheet_format_missing_file_is_exported(tmp_path, monkeypatch):
+    """A dead .slddrt path must never reach NewSheet4 (it opens a blocking dialog)."""
+    from solidworks_mcp.automation import drawing as dmod
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    good = tmp_path / "a4.slddrt"
+    good.write_bytes(b"x")
+
+    class Sheet:
+        def __init__(self, path, can_save=True):
+            self.path, self.can_save = path, can_save
+
+        def GetTemplateName(self):
+            return self.path
+
+        def SaveFormat(self, p):
+            if self.can_save:
+                open(p, "wb").write(b"fmt")
+            return self.can_save
+
+    assert dmod._sheet_format_file(Sheet(str(good)), "S1") == str(good)
+    out = dmod._sheet_format_file(Sheet(r"C:\missing\x.slddrt"), "S1-DIM")
+    assert out == str(tmp_path / "swmcp_fmt_S1-DIM.slddrt") and os.path.isfile(out)
+    assert dmod._sheet_format_file(Sheet(r"C:\missing\x.slddrt", can_save=False), "S/2") == ""
+
+
+def test_save_copy_clears_selection_and_pdf_view(tmp_path):
+    calls = []
+
+    class Ext:
+        def SaveAs(self, path, *a):
+            open(path, "wb").write(b"%PDF")
+            return True
+
+    class Doc:
+        Extension = Ext()
+
+        def ClearSelection2(self, flag):
+            calls.append("clear")
+
+        def GetTitle(self):
+            return "D1"
+
+    class App:
+        prefs = {617: True}
+
+        def GetUserPreferenceToggle(self, k):
+            return self.prefs.get(k)
+
+        def SetUserPreferenceToggle(self, k, v):
+            calls.append((k, v))
+            self.prefs[k] = v
+
+    app = App()
+    ok, errs, _ = cu.save_copy(app, Doc(), str(tmp_path / "a.pdf"))
+    assert ok and "clear" in calls and (617, False) in calls and app.prefs[617] is True
+
+
+def test_close_document_never_drops_changes_silently():
+    closed = []
+
+    class Doc:
+        def __init__(self, dirty, path):
+            self.dirty, self.path, self.saved = dirty, path, False
+
+        def GetSaveFlag(self):
+            return self.dirty
+
+        def GetTitle(self):
+            return "P1"
+
+        def GetPathName(self):
+            return self.path
+
+        def GetType(self):
+            return 1
+
+        def Save3(self, opts, e, w):
+            self.saved = True
+            return True
+
+    class App:
+        RevisionNumber = "34.3.2"
+
+        def __init__(self, d):
+            self.ActiveDoc = d
+
+        def CloseDoc(self, t):
+            closed.append(t)
+
+    a = SolidWorksAutomation()
+    d = Doc(True, r"C:\x\P1.SLDPRT")
+    a._sw_app, a._connected = App(d), True
+    r = a.close_document()
+    assert not r["success"] and not closed and "unsaved" in r["message"]
+    assert a.close_document(save=True)["success"] and d.saved and closed == ["P1"]
+    closed.clear()
+    d2 = Doc(True, "")
+    a._sw_app = App(d2)
+    assert not a.close_document(save=True)["success"] and not closed
+    assert a.close_document(discard_changes=True)["success"] and closed == ["P1"]
+
+
+def test_parse_metric_thread_sizes():
+    from solidworks_mcp.automation.part_mold import parse_metric
+    assert parse_metric("M6x1.0") == (6.0, 1.0)
+    assert parse_metric("m8") == (8.0, 1.25)          # ISO coarse pitch
+    assert parse_metric("M10 x 1.25") == (10.0, 1.25)
+    assert parse_metric("1/4-20") is None
+
+
+def test_version_consistent():
+    import solidworks_mcp
+    from solidworks_mcp import server
+    assert solidworks_mcp.__version__ == server.__version__

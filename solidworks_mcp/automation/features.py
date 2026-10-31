@@ -22,7 +22,7 @@ from typing import Optional, Dict
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwEndConditions
+from ..constants import SwErrors
 
 logger = logging.getLogger(__name__)
 
@@ -116,17 +116,16 @@ class FeatureOperations:
             Tuple of (success: bool, sketch_name: str, error_msg: str)
         """
         try:
-            # Step 1: Close active sketch if one is open
+            # Step 1: Close active sketch if one is open (merging coincident
+            # endpoints first so multi-segment profiles are connected)
+            from .com_utils import close_active_sketch
             try:
-                active_sketch = doc.SketchManager.ActiveSketch
-                if active_sketch is not None:
-                    doc.SketchManager.InsertSketch(True)
+                if close_active_sketch(doc):
                     logger.debug("Closed active sketch")
-            except:
-                # Try closing anyway
+            except Exception:
                 try:
                     doc.InsertSketch2(True)
-                except:
+                except Exception:
                     pass
             
             # Step 2: Clear selection
@@ -235,39 +234,6 @@ class FeatureOperations:
             except Exception as e:
                 logger.debug(f"FeatureExtrusion2 (23p) failed: {e}")
             
-            # Method 2: FeatureExtrusion2 with 20 params (older SW versions)
-            if feat is None:
-                try:
-                    feat = doc.FeatureManager.FeatureExtrusion2(
-                        True, False, False, end_cond, 0,
-                        depth_m, depth_m,
-                        False, False, False, False,
-                        0.0, 0.0,
-                        False, False, False,
-                        True, True, True, True
-                    )
-                    if feat:
-                        method_used = "FeatureExtrusion2_20p"
-                except Exception as e:
-                    logger.debug(f"FeatureExtrusion2 (20p) failed: {e}")
-            
-            # Method 3: FeatureExtrusion3 (some SW versions)
-            if feat is None:
-                try:
-                    feat = doc.FeatureManager.FeatureExtrusion3(
-                        True, False, False, end_cond, 0,
-                        depth_m, 0,
-                        False, False, False, False,
-                        0.0, 0.0,
-                        False, False, False,
-                        True, True, True,
-                        0, 0.0, False
-                    )
-                    if feat:
-                        method_used = "FeatureExtrusion3"
-                except Exception as e:
-                    logger.debug(f"FeatureExtrusion3 failed: {e}")
-            
             if feat is None:
                 sketch_info = self._get_sketch_info(doc)
                 return self._result(False,
@@ -333,7 +299,7 @@ class FeatureOperations:
             # Determine end condition
             if through_all:
                 if both_directions:
-                    end_cond = 2  # swEndCondThroughAllBoth
+                    end_cond = 9  # swEndCondThroughAllBoth (was 2 = ThroughNext, wrong)
                 else:
                     end_cond = 1  # swEndCondThroughAll
                 cut_depth = 0
@@ -467,15 +433,6 @@ class FeatureOperations:
                 except Exception as e:
                     logger.debug(f"FeatureFillet3 failed: {e}")
             
-            # Method 2: SimpleFillet
-            if feat is None:
-                try:
-                    feat = doc.FeatureManager.SimpleFillet(radius_m, True, True, True)
-                    if feat:
-                        method_used = "SimpleFillet"
-                except Exception as e:
-                    logger.debug(f"SimpleFillet failed: {e}")
-            
             if feat is None:
                 return self._result(False,
                     "Fillet failed - select edges first (use execute_python to select edges programmatically)",
@@ -516,20 +473,12 @@ class FeatureOperations:
             #  VertexChamDist1, VertexChamDist2, VertexChamDist3)
             # Options 4 = swFeatureChamferTangentPropagation
             # ChamferType 1 = swChamferAngleDistance
-            # The original code passed 7 args in the wrong order.
             try:
                 feat = doc.FeatureManager.InsertFeatureChamfer(
                     4, 1, dist_m, angle_rad, 0.0, 0.0, 0.0, 0.0
                 )
             except Exception as e:
                 logger.debug(f"InsertFeatureChamfer (8p) failed: {e}")
-            if feat is None:
-                try:
-                    feat = doc.FeatureManager.InsertFeatureChamfer(
-                        1, dist_m, angle_rad, dist_m, 0, False, False
-                    )
-                except Exception as e:
-                    logger.debug(f"InsertFeatureChamfer (legacy) failed: {e}")
             
             if feat is None:
                 return self._result(False,
@@ -545,72 +494,3 @@ class FeatureOperations:
         except Exception as e:
             logger.error(f"Chamfer error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFeatureError)
-    
-    # ========================================================================
-    # List Features (FIXED: properties not methods)
-    # ========================================================================
-    
-    def list_features(self) -> Dict:
-        """
-        List all features in the active document
-        FIXED v4.0: Uses properties (FirstFeature, GetNextFeature, GetTypeName2)
-        instead of method calls for SW 2025 compatibility.
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            features = []
-            
-            # FIXED: Use property access, not method calls
-            feat = doc.FirstFeature
-            
-            while feat is not None:
-                try:
-                    name = feat.Name
-                    # FIXED: GetTypeName2 is a property in SW 2025
-                    feat_type = feat.GetTypeName2
-                    
-                    features.append({
-                        "name": name,
-                        "type": feat_type,
-                    })
-                except:
-                    pass
-                
-                # FIXED: GetNextFeature is a property in SW 2025
-                try:
-                    feat = feat.GetNextFeature
-                except:
-                    break
-            
-            return self._result(True, f"{len(features)} features found",
-                              SwErrors.swSuccess,
-                              {"features": features, "count": len(features)})
-            
-        except Exception as e:
-            logger.error(f"List features error: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
-    
-    # ========================================================================
-    # Edge Selection Helper
-    # ========================================================================
-    
-    def select_edge(self, edge_index: int = 1) -> Dict:
-        """
-        Select an edge by index
-        Note: Use execute_python for precise edge selection
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            doc.ClearSelection2(True)
-            
-            return self._result(True, "Use execute_python for edge selection",
-                              SwErrors.swSuccess)
-            
-        except Exception as e:
-            return self._result(False, f"Error: {e}", SwErrors.swSelectionError)

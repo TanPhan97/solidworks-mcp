@@ -42,6 +42,11 @@ class SketchOperations:
             if err:
                 return err
             
+            # Close a sketch that is still open, otherwise InsertSketch2 would
+            # toggle it closed instead of starting the new one
+            from .com_utils import close_active_sketch
+            close_active_sketch(doc)
+            
             # Get plane name
             plane_name = SwPlanes.get(plane)
             
@@ -91,6 +96,9 @@ class SketchOperations:
             z_m = self._units.to_meters(z, unit)
             unit_str = unit or self._units.default_unit.value
             
+            from .com_utils import close_active_sketch
+            close_active_sketch(doc)
+            
             # Clear any selection
             doc.ClearSelection2(True)
             
@@ -130,7 +138,9 @@ class SketchOperations:
             if err:
                 return err
             
-            doc.InsertSketch2(True)
+            from .com_utils import close_active_sketch
+            if not close_active_sketch(doc):
+                return self._result(True, "No sketch was open", SwErrors.swSuccess)
             
             return self._result(True, "Exited sketch", SwErrors.swSuccess)
             

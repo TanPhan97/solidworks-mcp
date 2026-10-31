@@ -7,6 +7,7 @@ pywin32 dynamic dispatch. These helpers hide that difference and provide the
 VARIANT wrappers needed for ByRef / empty / array parameters.
 """
 
+import os
 import types
 import logging
 from typing import Any, List, Sequence
@@ -33,6 +34,18 @@ def call(obj, name: str, *args):
     if args or isinstance(attr, types.MethodType):
         return attr(*args)
     return attr
+
+
+def invoke_method(obj, name: str, *args):
+    """
+    Call a COM *method* through IDispatch with DISPATCH_METHOD. Needed for objects
+    that expose no type info (IMeasure, IMathUtility on SW 2026): pywin32 then reads
+    `obj.Name` as a property get, so `obj.Name(args)` fails with 'Member not found'
+    or "'bool' object is not callable".
+    """
+    ole = obj._oleobj_
+    dispid = ole.GetIDsOfNames(name)
+    return ole.Invoke(dispid, 0, pythoncom.DISPATCH_METHOD, True, *args)
 
 
 def try_call(obj, name: str, *args, default=None):
@@ -139,26 +152,41 @@ def selected_count(doc) -> int:
 # Sketch space <-> model space
 # ----------------------------------------------------------------------------
 
+def transform_point(xform, p, inverse: bool = False) -> List[float]:
+    """
+    Apply an IMathTransform to point p (metres) using its ArrayData:
+    [R (3x3, row-major), T (3), scale, unused (3)], row-vector convention
+    p' = s * (p . R) + T   (verified on SOLIDWORKS 2026).
+    Computed in Python because IMathUtility.CreatePoint is not callable through
+    pywin32 late binding (the object exposes no type info -> 'Member not found').
+    """
+    a = [float(v) for v in as_list(call(xform, "ArrayData"))]
+    R = [a[0:3], a[3:6], a[6:9]]
+    T, s = a[9:12], (a[12] or 1.0)
+    if not inverse:
+        return [s * sum(p[i] * R[i][j] for i in range(3)) + T[j] for j in range(3)]
+    q = [(p[j] - T[j]) / s for j in range(3)]
+    return [sum(q[j] * R[i][j] for j in range(3)) for i in range(3)]   # q . R^T
+
+
 def sketch_to_model(sw_app, doc, x: float, y: float, z: float = 0.0) -> List[float]:
     """
-    Transform a point from active-sketch coordinates (meters) to model
-    coordinates (meters). SelectByID2 works in model space; SketchManager.Create*
-    works in sketch space. Falls back to identity if no sketch is active.
+    Active-sketch coordinates -> model coordinates (metres). SelectByID2 works in
+    model space; SketchManager.Create* in sketch space. Identity if no sketch.
     """
     try:
         sketch = call(doc.SketchManager, "ActiveSketch")
         if sketch is None:
             return [x, y, z]
-        xform = call(sketch, "ModelToSketchTransform")
-        inv = call(xform, "Inverse")
-        math_util = call(sw_app, "GetMathUtility")
-        pt = math_util.CreatePoint(double_array([x, y, z]))
-        pt_model = pt.MultiplyTransform(inv)
-        data = as_list(call(pt_model, "ArrayData"))
-        return [float(data[0]), float(data[1]), float(data[2])]
+        return transform_point(call(sketch, "ModelToSketchTransform"), [x, y, z], inverse=True)
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"sketch_to_model fallback to identity: {e}")
+        logger.warning(f"sketch_to_model fell back to identity: {e}")
         return [x, y, z]
+
+
+def model_to_sketch(sketch, p) -> List[float]:
+    """Model point (metres) -> coordinates in `sketch` (an ISketch)."""
+    return transform_point(call(sketch, "ModelToSketchTransform"), list(p))
 
 
 def set_dimension_value(dim, value_si: float) -> bool:
@@ -181,11 +209,166 @@ def set_dimension_value(dim, value_si: float) -> bool:
         return False
 
 
-def rebuild(doc, force: bool = False) -> bool:
+def merge_sketch_endpoints(doc, tol: float = 1e-8) -> int:
+    """
+    Merge coincident endpoints of the ACTIVE sketch (sgMERGEPOINTS).
+
+    With sketch inference off (common with API sketching), separate Create*
+    calls leave duplicate points where segments meet: a line + arc path or a
+    polyline profile is then *not connected*, and sweeps / extrusions of it
+    fail. Verified on SW 2026: a line+arc sweep path failed until the shared
+    endpoint was merged. Returns the number of merged point groups.
+    """
+    sketch = try_call(doc.SketchManager, "ActiveSketch")
+    if sketch is None:
+        return 0
+    ends = []
+    for seg in as_list(try_call(sketch, "GetSketchSegments")):
+        for name in ("GetStartPoint2", "GetEndPoint2"):
+            p = try_call(seg, name)
+            if p is not None:
+                ends.append(p)
+    groups = []
+    for p in ends:
+        try:
+            xyz = (float(call(p, "X")), float(call(p, "Y")), float(call(p, "Z")))
+        except Exception:  # noqa: BLE001
+            continue
+        for g in groups:
+            if all(abs(a - b) <= tol for a, b in zip(g[0], xyz)):
+                g[1].append(p)
+                break
+        else:
+            groups.append((xyz, [p]))
+    merged = 0
+    for _xyz, pts in groups:
+        if len(pts) < 2:
+            continue
+        doc.ClearSelection2(True)
+        if all(select_entity_object(doc, p, i > 0, 0) for i, p in enumerate(pts)):
+            try:
+                doc.SketchAddConstraints("sgMERGEPOINTS")
+                merged += 1
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"merge points failed: {e}")
+    if merged:
+        doc.ClearSelection2(True)
+    return merged
+
+
+def close_active_sketch(doc) -> bool:
+    """Merge coincident endpoints, then exit the active sketch. True if one was open."""
+    if try_call(doc.SketchManager, "ActiveSketch") is None:
+        return False
+    merge_sketch_endpoints(doc)
     try:
+        doc.SketchManager.InsertSketch(True)
+    except Exception:  # noqa: BLE001
+        try_call(doc, "InsertSketch2", True)
+    return True
+
+
+def open_doc_paths(sw_app) -> set:
+    """normcase'd paths of every document SolidWorks has loaded (incl. referenced)."""
+    out = set()
+    for d in as_list(try_call(sw_app, "GetDocuments")):
+        p = str(try_call(d, "GetPathName", default="") or "")
+        if p:
+            out.add(os.path.normcase(os.path.abspath(p)))
+    return out
+
+
+def find_open_doc(sw_app, path: str):
+    """Loaded document for `path` (by full path, then by scanning GetDocuments)."""
+    doc = try_call(sw_app, "GetOpenDocumentByName", path)
+    if doc is not None:
+        return doc
+    key = os.path.normcase(os.path.abspath(path))
+    for d in as_list(try_call(sw_app, "GetDocuments")):
+        p = str(try_call(d, "GetPathName", default="") or "")
+        if p and os.path.normcase(os.path.abspath(p)) == key:
+            return d
+    return None
+
+
+_MESH_EXTS = {".stl", ".3mf", ".amf", ".wrl"}
+# swUserPreferenceToggle_e (SW 2026 swconst.tlb)
+_STL_ONE_FILE, _STL_INFO_DIALOG, _STL_PREVIEW = 72, 70, 191
+_PDF_VIEW_ON_SAVE = 617          # swPDFViewOnSave: opens the PDF in a viewer, which locks it
+
+
+def save_copy(sw_app, doc, path: str):
+    """
+    Save a copy of `doc` to `path` (format from extension), document keeps its
+    own path. For mesh formats the STL info / preview dialogs (which block COM)
+    are switched off and assembly components are merged into one file; for PDF
+    "view on save" is switched off (the viewer locks the file); the selection is
+    cleared (otherwise only selected entities are exported). User preferences are
+    restored afterwards. Returns (ok, errors, warnings); errors is a str when the
+    target file is locked.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    if os.path.exists(path):
+        try:
+            open(path, "r+b").close()
+        except OSError:
+            return False, "target file is locked (open in another program)", None
+    saved_prefs = {}
+    prev_active = None
+    ext = os.path.splitext(path)[1].lower()
+    mesh = ext in _MESH_EXTS and sw_app is not None
+    toggles = []
+    if mesh:
+        toggles = [(_STL_INFO_DIALOG, False), (_STL_PREVIEW, False), (_STL_ONE_FILE, True)]
+    elif ext == ".pdf" and sw_app is not None:
+        toggles = [(_PDF_VIEW_ON_SAVE, False)]
+    for key, val in toggles:
+        old = try_call(sw_app, "GetUserPreferenceToggle", key)
+        if old is not None:
+            saved_prefs[key] = bool(old)
+            try_call(sw_app, "SetUserPreferenceToggle", key, val)
+    # A leftover selection (e.g. a face from the last feature) makes STEP / STL
+    # export only the selected entities: SW 2026 wrote a 4.5 KB STEP of a plate.
+    try_call(doc, "ClearSelection2", True)
+    if mesh:
+        # The mesh translator exports the ACTIVE document, not `doc` (SW 2026: an STL
+        # "of a part" contained the components of the active assembly).
+        active = try_call(sw_app, "ActiveDoc")
+        title = str(try_call(doc, "GetTitle", default="") or "")
+        if active is not None and str(try_call(active, "GetTitle", default="")) != title:
+            prev_active = str(try_call(active, "GetTitle", default="") or "")
+            try_call(sw_app, "ActivateDoc3", title, False, 0, byref_int(0))
+    e, w = byref_int(0), byref_int(0)
+    ok = False
+    try:
+        r = doc.Extension.SaveAs(path, 0, 1 | 2, nothing(), e, w)      # Silent | Copy
+        ok = bool(r[0] if isinstance(r, tuple) else r)
+    except Exception as ex:  # noqa: BLE001
+        logger.debug(f"Extension.SaveAs {path} failed: {ex}")
+    if not ok:
+        try:
+            ok = doc.SaveAs3(path, 0, 1 | 2) == 0
+        except Exception as ex:  # noqa: BLE001
+            logger.debug(f"SaveAs3 {path} failed: {ex}")
+    for key, val in saved_prefs.items():
+        try_call(sw_app, "SetUserPreferenceToggle", key, val)
+    if prev_active:
+        try_call(sw_app, "ActivateDoc3", prev_active, False, 0, byref_int(0))
+    return ok and os.path.isfile(path), getattr(e, "value", None), getattr(w, "value", None)
+
+
+def rebuild(doc, force: bool = False) -> bool:
+    """
+    Rebuild the model. While a sketch is being edited only redraw: EditRebuild3
+    there exits the sketch (like Ctrl+B), which breaks follow-up sketch calls.
+    """
+    try:
+        if try_call(try_call(doc, "SketchManager"), "ActiveSketch") is not None:
+            try_call(doc, "GraphicsRedraw2")
+            return True
         if force:
             return bool(doc.ForceRebuild3(False))
-        return bool(doc.EditRebuild3())
+        return bool(call(doc, "EditRebuild3"))
     except Exception as e:  # noqa: BLE001
         logger.debug(f"rebuild failed: {e}")
         return False
