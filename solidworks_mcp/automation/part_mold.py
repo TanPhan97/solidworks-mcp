@@ -127,7 +127,7 @@ class PartMoldOperations:
             self._require_part(doc)
             cu.close_active_sketch(doc)
             uniform = factor is not None
-            sx, sy, sz = (factor,) * 3 if uniform else (x or 1.0, y or 1.0, z or 1.0)
+            sx, sy, sz = (factor,) * 3 if uniform else tuple(1.0 if v is None else v for v in (x, y, z))
             if min(sx, sy, sz) <= 0:
                 return self._result(False, "Scale factors must be > 0", SwErrors.swInvalidInput)
             v0 = cu.try_call(cu.try_call(doc.Extension, "CreateMassProperty"), "Volume", default=None)
@@ -238,7 +238,7 @@ class PartMoldOperations:
                 return self._result(False, "Body not found (list_bodies)", SwErrors.swInvalidInput)
             doc.ClearSelection2(True)
             for i, o in enumerate(objs):
-                o.Select2(i > 0, None)
+                o.Select2(i > 0, 0)
             feat = doc.FeatureManager.InsertDeleteBody2(bool(keep))
             if feat is None:
                 return self._result(False, "Delete/Keep body failed", SwErrors.swFeatureError)

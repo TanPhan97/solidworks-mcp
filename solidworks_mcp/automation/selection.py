@@ -80,12 +80,15 @@ class SelectionOperations:
     # Topology enumeration (internal)
     # ======================================================================
 
-    def _get_bodies(self, doc) -> List[Any]:
+    def _get_bodies(self, doc, include_surfaces: bool = True) -> List[Any]:
         if cu.doc_type(doc) != 1:
             raise ValueError("Topology listing is supported on part documents only")
         # Solid bodies first (indices of solid-only parts stay stable), then surface
         # (sheet) bodies so surface faces / edges can be listed and selected too.
-        return cu.as_list(doc.GetBodies2(0, True)) + cu.as_list(doc.GetBodies2(1, True))
+        bodies = cu.as_list(doc.GetBodies2(0, True))
+        if include_surfaces:
+            bodies += cu.as_list(doc.GetBodies2(1, True))
+        return bodies
 
     def _edge_records(self, doc) -> List[Dict]:
         records = []
